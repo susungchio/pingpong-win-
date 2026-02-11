@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'package:collection/collection.dart';
 import 'models.dart';
 
 class MatchSheetPage extends StatelessWidget {
@@ -11,326 +10,256 @@ class MatchSheetPage extends StatelessWidget {
   final List<Group> groups;
   final List<Round>? knockoutRounds;
 
-  const MatchSheetPage({super.key, required this.tournamentTitle, required this.groups, this.knockoutRounds});
+  const MatchSheetPage({
+    super.key,
+    required this.tournamentTitle,
+    required this.groups,
+    this.knockoutRounds,
+  });
 
-  Future<void> _printDocument() async {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('예선 기록지 인쇄 미리보기'),
+        backgroundColor: const Color(0xFF1A535C),
+        foregroundColor: Colors.white,
+      ),
+      body: PdfPreview(
+        build: (format) => _generatePdf(format),
+        initialPageFormat: PdfPageFormat.a4,
+        pdfFileName: 'group_stage_sheets.pdf',
+        canChangePageFormat: false,
+        allowPrinting: true,
+        allowSharing: true,
+        loadingWidget: const Center(child: CircularProgressIndicator()),
+        onError: (context, error) => Center(child: Text('PDF 생성 오류: $error')),
+      ),
+    );
+  }
+
+  Future<Uint8List> _generatePdf(PdfPageFormat format) async {
     final doc = pw.Document();
     
-    final font = await PdfGoogleFonts.nanumGothicRegular();
-    final fontBold = await PdfGoogleFonts.nanumGothicBold();
+    pw.Font font;
+    pw.Font fontBold;
+    try {
+      font = await PdfGoogleFonts.nanumGothicRegular();
+      fontBold = await PdfGoogleFonts.nanumGothicBold();
+    } catch (e) {
+      font = pw.Font.helvetica();
+      fontBold = pw.Font.helveticaBold();
+    }
 
-    // 1. 예선 오다지 (조별 리그 테이블) - 한 페이지에 3개씩
-    for (int i = 0; i < groups.length; i += 3) {
+    const double a4Width = 595.28;
+    const double a4Height = 841.89;
+    const double halfHeight = a4Height / 2;
+
+    for (int i = 0; i < groups.length; i += 2) {
       final g1 = groups[i];
       final g2 = (i + 1 < groups.length) ? groups[i + 1] : null;
-      final g3 = (i + 2 < groups.length) ? groups[i + 2] : null;
 
       doc.addPage(
         pw.Page(
           pageFormat: PdfPageFormat.a4,
-          margin: const pw.EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+          margin: const pw.EdgeInsets.all(0),
           build: (pw.Context context) {
-            return pw.Column(
+            return pw.Stack(
               children: [
-                _buildPdfGroupTable(g1, font, fontBold),
+                ..._buildAbsoluteGroupSheet(g1, 0, a4Width, halfHeight, font, fontBold),
                 if (g2 != null) ...[
-                  pw.SizedBox(height: 10),
-                  pw.Divider(borderStyle: pw.BorderStyle.dashed, thickness: 0.5),
-                  pw.SizedBox(height: 10),
-                  _buildPdfGroupTable(g2, font, fontBold),
+                  pw.Positioned(
+                    top: halfHeight,
+                    left: 20, right: 20,
+                    child: pw.Container(
+                      height: 1,
+                      decoration: const pw.BoxDecoration(
+                        border: pw.Border(bottom: pw.BorderSide(color: PdfColors.grey400, width: 0.5, style: pw.BorderStyle.dashed))
+                      ),
+                    ),
+                  ),
+                  ..._buildAbsoluteGroupSheet(g2, halfHeight, a4Width, halfHeight, font, fontBold),
                 ],
-                if (g3 != null) ...[
-                  pw.SizedBox(height: 10),
-                  pw.Divider(borderStyle: pw.BorderStyle.dashed, thickness: 0.5),
-                  pw.SizedBox(height: 10),
-                  _buildPdfGroupTable(g3, font, fontBold),
-                ]
               ],
             );
           },
         ),
       );
     }
+    return doc.save();
+  }
 
-    // 2. 본선 오다지 페이지 추가
-    if (knockoutRounds != null && knockoutRounds!.isNotEmpty) {
-      doc.addPage(
-        pw.MultiPage(
-          pageFormat: PdfPageFormat.a4,
-          build: (pw.Context context) {
-            return [
-              pw.Center(child: pw.Text('본선 토너먼트 기록지', style: pw.TextStyle(font: fontBold, fontSize: 24))),
-              pw.SizedBox(height: 20),
-              for (var round in knockoutRounds!) ...[
-                pw.Padding(
-                  padding: const pw.EdgeInsets.symmetric(vertical: 10),
-                  child: pw.Text('[${round.name}]', style: pw.TextStyle(font: fontBold, fontSize: 16, color: PdfColors.blue900)),
-                ),
-                pw.TableHelper.fromTextArray(
-                  context: context,
-                  cellStyle: pw.TextStyle(font: font, fontSize: 10),
-                  headerStyle: pw.TextStyle(font: fontBold, fontSize: 10),
-                  data: <List<String>>[
-                    <String>['경기', '선수 1', '점수', '선수 2', '승자'],
-                    ...round.matches.asMap().entries.map((e) => [
-                      '${e.key + 1}',
-                      e.value.player1?.name ?? 'TBD',
-                      '',
-                      e.value.player2?.name ?? 'TBD',
-                      ''
-                    ])
-                  ],
-                ),
-                pw.SizedBox(height: 10),
-              ]
-            ];
-          },
+  List<pw.Widget> _buildAbsoluteGroupSheet(
+      Group group, double offsetY, double pageWidth, double pageHeight, pw.Font font, pw.Font fontBold) {
+    final List<pw.Widget> widgets = [];
+    final players = group.players;
+
+    const double startX = 45.0;
+    final double endX = pageWidth - 45.0;
+    final double contentWidth = endX - startX;
+    
+    // 타이틀 박스
+    const double titleBoxTop = 40.0;
+    const double titleBoxHeight = 40.0;
+
+    // 대진표 박스 (타이틀 아래 5mm = 14.17pt 여백)
+    const double gap5mm = 14.17;
+    final double tableBoxTop = titleBoxTop + titleBoxHeight + gap5mm;
+    const double col1Width = 140.0; // 왼쪽 열 너비
+    const double resultAreaWidth = 135.0; // 45 * 3
+    
+    // 단체전 선수명 3줄 대응을 위해 행 높이 설정
+    double rowHeight = 60.0;
+    if (players.length > 5) rowHeight = 50.0;
+    
+    final double tableHeight = (players.length + 1) * rowHeight;
+    final double playerAreaWidth = contentWidth - col1Width - resultAreaWidth;
+    final double playerColWidth = players.isNotEmpty ? (playerAreaWidth / players.length) : playerAreaWidth;
+
+    // 1. 타이틀 박스 디자인 (이중 테두리 적용)
+    widgets.add(pw.Positioned(
+      top: offsetY + titleBoxTop,
+      left: startX,
+      child: pw.Container(
+        width: contentWidth,
+        height: titleBoxHeight,
+        decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.8)),
+        padding: const pw.EdgeInsets.symmetric(horizontal: 15),
+        alignment: pw.Alignment.centerLeft,
+        child: pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text(tournamentTitle, style: pw.TextStyle(font: fontBold, fontSize: 11)),
+            pw.Text(group.name, style: pw.TextStyle(font: fontBold, fontSize: 18)),
+          ],
         ),
-      );
+      ),
+    ));
+    // 타이틀 외곽 이중선
+    widgets.add(pw.Positioned(
+      top: offsetY + titleBoxTop - 1.5,
+      left: startX - 1.5,
+      child: pw.Container(width: contentWidth + 3.0, height: titleBoxHeight + 3.0, decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.5)))),
+    );
+
+    // 2. 대진표 헤더 (상단 가로 행)
+    widgets.add(pw.Positioned(
+      top: offsetY + tableBoxTop,
+      left: startX,
+      child: _tableCell(group.name, col1Width, rowHeight, fontBold, fontSize: 15, isHeader: true),
+    ));
+
+    for (int j = 0; j < players.length; j++) {
+      // 상단 헤더: 클럽명만 표시 (선수이름 생략)
+      widgets.add(pw.Positioned(
+        top: offsetY + tableBoxTop,
+        left: startX + col1Width + (j * playerColWidth),
+        child: pw.Container(
+          width: playerColWidth,
+          height: rowHeight,
+          decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.5), color: PdfColors.grey100),
+          alignment: pw.Alignment.center,
+          padding: const pw.EdgeInsets.symmetric(horizontal: 2),
+          child: pw.Text(players[j].affiliation, style: pw.TextStyle(font: fontBold, fontSize: 10), textAlign: pw.TextAlign.center),
+        ),
+      ));
     }
 
-    await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => doc.save());
+    final labels = ['승패', '득실', '순위'];
+    for (int l = 0; l < 3; l++) {
+      widgets.add(pw.Positioned(
+        top: offsetY + tableBoxTop,
+        left: endX - resultAreaWidth + (l * 45.0),
+        child: _tableCell(labels[l], 45.0, rowHeight, fontBold, fontSize: 11, isHeader: true),
+      ));
+    }
+
+    // 3. 데이터 행 (왼쪽 선수 정보 및 점수칸)
+    for (int i = 0; i < players.length; i++) {
+      double rowY = offsetY + tableBoxTop + ((i + 1) * rowHeight);
+
+      // 왼쪽 선수 정보 셀 (소속 + 선수명 한줄에 2명씩 3줄)
+      widgets.add(pw.Positioned(
+        top: rowY,
+        left: startX,
+        child: _teamPlayerCell(players[i], col1Width, rowHeight, font, fontBold),
+      ));
+
+      for (int j = 0; j < players.length; j++) {
+        widgets.add(pw.Positioned(
+          top: rowY,
+          left: startX + col1Width + (j * playerColWidth),
+          child: pw.Container(
+            width: playerColWidth,
+            height: rowHeight,
+            decoration: pw.BoxDecoration(
+              border: pw.Border.all(width: 0.5),
+              color: i == j ? PdfColors.grey300 : null,
+            ),
+          ),
+        ));
+      }
+
+      for (int l = 0; l < 3; l++) {
+        widgets.add(pw.Positioned(
+          top: rowY,
+          left: endX - resultAreaWidth + (l * 45.0),
+          child: pw.Container(width: 45.0, height: rowHeight, decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.5))),
+        ));
+      }
+    }
+
+    // 대진표 외곽 이중선
+    widgets.add(pw.Positioned(
+      top: offsetY + tableBoxTop - 1.5,
+      left: startX - 1.5,
+      child: pw.Container(width: contentWidth + 3.0, height: tableHeight + 3.0, decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.8)))),
+    );
+
+    // 4. 하단 서명란
+    widgets.add(pw.Positioned(
+      top: offsetY + tableBoxTop + tableHeight + 20.0,
+      right: startX,
+      child: pw.Text('경기 확인 및 서명: ________________________', style: pw.TextStyle(font: fontBold, fontSize: 12)),
+    ));
+
+    return widgets;
   }
 
-  pw.Widget _buildPdfGroupTable(Group group, pw.Font font, pw.Font fontBold) {
-    final players = group.players;
-    
+  pw.Widget _tableCell(String text, double w, double h, pw.Font font, {double fontSize = 10, bool isHeader = false}) {
     return pw.Container(
+      width: w, height: h,
+      decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.5), color: isHeader ? PdfColors.grey100 : null),
+      alignment: pw.Alignment.center,
+      child: pw.Text(text, style: pw.TextStyle(font: font, fontSize: fontSize)),
+    );
+  }
+
+  pw.Widget _teamPlayerCell(Player p, double w, double h, pw.Font font, pw.Font fontBold) {
+    List<String> playerNames = p.name.split(',').map((e) => e.trim()).toList();
+    List<pw.Widget> nameRows = [];
+
+    // 소속과 선수명 폰트 크기를 9pt로 통일
+    const double fontSize = 9.0;
+
+    for (int i = 0; i < playerNames.length && i < 6; i += 2) {
+      String line = playerNames[i];
+      if (i + 1 < playerNames.length) line += ", ${playerNames[i+1]}";
+      nameRows.add(pw.Text(line, style: pw.TextStyle(font: font, fontSize: fontSize), maxLines: 1));
+    }
+
+    return pw.Container(
+      width: w, height: h,
+      decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.5)),
+      padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 3),
       child: pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        mainAxisAlignment: pw.MainAxisAlignment.center,
         children: [
-          pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-            children: [
-              pw.Text('$tournamentTitle 예선전', style: pw.TextStyle(font: fontBold, fontSize: 13)),
-              pw.Text(group.name, style: pw.TextStyle(font: fontBold, fontSize: 18)),
-            ],
-          ),
-          pw.SizedBox(height: 6),
-          pw.Table(
-            border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
-            columnWidths: {
-              0: const pw.FlexColumnWidth(2.2), // Name Column
-              for (int i = 0; i < players.length; i++) i + 1: const pw.FlexColumnWidth(2),
-              players.length + 1: const pw.FlexColumnWidth(0.8), // WL
-              players.length + 2: const pw.FlexColumnWidth(0.8), // GL
-              players.length + 3: const pw.FlexColumnWidth(0.7), // R
-            },
-            children: [
-              // Header Row
-              pw.TableRow(
-                children: [
-                  _pdfCell(group.name, fontBold, center: true, bgColor: PdfColors.grey100, fontSize: 9),
-                  ...players.map((p) => _pdfCell('${p.name}\n${p.affiliation}', fontBold, center: true, fontSize: 8, bgColor: PdfColors.grey100)),
-                  _pdfCell('WL', fontBold, center: true, bgColor: PdfColors.grey100, fontSize: 9),
-                  _pdfCell('GL', fontBold, center: true, bgColor: PdfColors.grey100, fontSize: 9),
-                  _pdfCell('R', fontBold, center: true, textColor: PdfColors.white, bgColor: PdfColors.orange, fontSize: 9),
-                ],
-              ),
-              // Player Rows
-              ...players.asMap().entries.map((entry) {
-                int rowIndex = entry.key;
-                Player pRow = entry.value;
-                return pw.TableRow(
-                  children: [
-                    _pdfCell(pRow.name, fontBold, center: true, textColor: PdfColors.blue800, fontSize: 9), // 텍스트 가운데 정렬
-                    ...players.asMap().entries.map((colEntry) {
-                      int colIndex = colEntry.key;
-                      Player pCol = colEntry.value;
-                      if (rowIndex == colIndex) {
-                        return pw.Container(
-                          color: PdfColors.grey300, 
-                          constraints: const pw.BoxConstraints(minHeight: 25)
-                        );
-                      }
-                      
-                      final match = group.matches.firstWhereOrNull((m) => 
-                        (m.player1?.id == pRow.id && m.player2?.id == pCol.id) ||
-                        (m.player1?.id == pCol.id && m.player2?.id == pRow.id)
-                      );
-                      String score = '';
-                      if (match != null && match.status == MatchStatus.completed) {
-                        score = (match.player1?.id == pRow.id) ? '${match.score1}' : '${match.score2}';
-                      }
-                      
-                      return _pdfCell(score, font, center: true, fontSize: 12); // 점수 가운데 정렬
-                    }),
-                    _pdfCell('', font, center: true),
-                    _pdfCell('', font, center: true),
-                    _pdfCell('', font, center: true, bgColor: PdfColors.orange100),
-                  ],
-                );
-              }),
-            ],
-          ),
-          pw.SizedBox(height: 5),
-          pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.end,
-            children: [
-              pw.Text('확인: ________________ (서명)', style: pw.TextStyle(font: font, fontSize: 9)),
-            ],
-          ),
+          pw.Text(p.affiliation, style: pw.TextStyle(font: fontBold, fontSize: fontSize), maxLines: 1),
+          if (nameRows.isNotEmpty) pw.SizedBox(height: 1),
+          ...nameRows,
         ],
       ),
-    );
-  }
-
-  pw.Widget _pdfCell(String text, pw.Font font, {bool center = false, double fontSize = 10, PdfColor? textColor, PdfColor? bgColor}) {
-    return pw.Container(
-      alignment: center ? pw.Alignment.center : pw.Alignment.centerLeft,
-      padding: const pw.EdgeInsets.symmetric(vertical: 4, horizontal: 2),
-      color: bgColor,
-      constraints: const pw.BoxConstraints(minHeight: 25),
-      child: pw.Text(text, 
-        textAlign: center ? pw.TextAlign.center : pw.TextAlign.left,
-        style: pw.TextStyle(font: font, fontSize: fontSize, color: textColor ?? PdfColors.black)
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('진행 기록지 (오다지)'),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.print, color: Colors.blue),
-              onPressed: _printDocument,
-              tooltip: '기록지 출력/PDF 저장',
-            ),
-          ],
-          bottom: const TabBar(
-            tabs: [Tab(text: '예선전'), Tab(text: '본선')],
-          ),
-        ),
-        body: TabBarView(
-          children: [
-            _buildGroupView(),
-            _buildKnockoutView(),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildGroupView() {
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: groups.length,
-      itemBuilder: (context, index) {
-        final group = groups[index];
-        final players = group.players;
-        return Card(
-          margin: const EdgeInsets.only(bottom: 24),
-          child: Padding(
-            padding: const EdgeInsets.all(12.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('$tournamentTitle 예선전', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                    Text(group.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Table(
-                    defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-                    border: TableBorder.all(color: Colors.grey.shade300),
-                    columnWidths: {
-                      0: const FixedColumnWidth(100),
-                      for (int i = 0; i < players.length; i++) i + 1: const FixedColumnWidth(80),
-                      players.length + 1: const FixedColumnWidth(40),
-                      players.length + 2: const FixedColumnWidth(40),
-                      players.length + 3: const FixedColumnWidth(40),
-                    },
-                    children: [
-                      TableRow(
-                        decoration: BoxDecoration(color: Colors.grey.shade100),
-                        children: [
-                          _uiCell(group.name, isBold: true, center: true),
-                          ...players.map((p) => _uiCell('${p.name}\n${p.affiliation}', isBold: true, center: true, fontSize: 10)),
-                          _uiCell('WL', isBold: true, center: true),
-                          _uiCell('GL', isBold: true, center: true),
-                          _uiCell('R', isBold: true, center: true, textColor: Colors.white, bgColor: Colors.orange),
-                        ],
-                      ),
-                      ...players.asMap().entries.map((entry) {
-                        int rowIndex = entry.key;
-                        Player pRow = entry.value;
-                        return TableRow(
-                          children: [
-                            _uiCell(pRow.name, isBold: true, center: true, textColor: Colors.blue),
-                            ...players.asMap().entries.map((colEntry) {
-                              int colIndex = colEntry.key;
-                              Player pCol = colEntry.value;
-                              if (rowIndex == colIndex) return Container(color: Colors.grey.shade200, height: 40);
-                              
-                              final match = group.matches.firstWhereOrNull((m) => 
-                                (m.player1?.id == pRow.id && m.player2?.id == pCol.id) ||
-                                (m.player1?.id == pCol.id && m.player2?.id == pRow.id)
-                              );
-                              String score = '';
-                              if (match != null && match.status == MatchStatus.completed) {
-                                score = (match.player1?.id == pRow.id) ? '${match.score1}' : '${match.score2}';
-                              }
-                              return _uiCell(score, center: true, fontSize: 16);
-                            }),
-                            _uiCell('', center: true), _uiCell('', center: true), _uiCell('', center: true, bgColor: Colors.orange.withOpacity(0.1)),
-                          ],
-                        );
-                      }),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _uiCell(String text, {bool isBold = false, bool center = false, double fontSize = 12, Color? textColor, Color? bgColor}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-      alignment: center ? Alignment.center : Alignment.centerLeft,
-      color: bgColor,
-      child: Text(text, 
-        textAlign: center ? TextAlign.center : TextAlign.left,
-        style: TextStyle(
-          fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
-          fontSize: fontSize,
-          color: textColor,
-        )
-      ),
-    );
-  }
-
-  Widget _buildKnockoutView() {
-    if (knockoutRounds == null) return const Center(child: Text('본선이 생성되지 않았습니다.'));
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: knockoutRounds!.length,
-      itemBuilder: (context, index) {
-        final round = knockoutRounds![index];
-        return Column(
-          children: [
-            Text(round.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-            ...round.matches.map((m) => ListTile(
-              title: Text('${m.player1?.name ?? "TBD"} VS ${m.player2?.name ?? "TBD"}'),
-              subtitle: const Text('결과 기입란: _________'),
-            )),
-            const Divider(),
-          ],
-        );
-      },
     );
   }
 }
