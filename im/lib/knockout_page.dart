@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart' as material;
-import 'package:flutter/material.dart' show Colors, IconButton, Icons, Scaffold, AppBar, Text, TextButton, Padding, Navigator, StatefulWidget, State, VoidCallback, BuildContext, InteractiveViewer, Container, Stack, Positioned, CustomPaint, Size, Canvas, Paint, PaintingStyle, Path, InkWell, GestureDetector, HitTestBehavior, SizedBox, Divider, FontWeight, TextStyle, Alignment, BorderRadius, BoxShadow, BoxDecoration, Border, Radius, BoxShape, BorderSide, Clip, Color, math, showModalBottomSheet, StatefulBuilder, Row, Expanded, Column, MainAxisSize, MainAxisAlignment, CrossAxisAlignment, TextAlign, ElevatedButton, TextOverflow, RoundedRectangleBorder, EdgeInsets, Widget, PreferredSize, MaterialPageRoute;
+import 'package:flutter/material.dart' show Colors, IconButton, Icons, Scaffold, AppBar, Text, TextButton, Padding, Navigator, StatefulWidget, State, VoidCallback, BuildContext, InteractiveViewer, Container, Stack, Positioned, CustomPaint, Size, Canvas, Paint, PaintingStyle, Path, InkWell, GestureDetector, HitTestBehavior, SizedBox, Divider, FontWeight, TextStyle, Alignment, BorderRadius, BoxShadow, BoxDecoration, Border, Radius, BoxShape, BorderSide, Clip, Color, math, showModalBottomSheet, StatefulBuilder, Row, Expanded, Column, MainAxisSize, MainAxisAlignment, CrossAxisAlignment, TextAlign, ElevatedButton, TextOverflow, RoundedRectangleBorder, EdgeInsets, Widget, PreferredSize, MaterialPageRoute, CustomPainter;
 import 'models.dart';
 import 'tournament_logic.dart';
 import 'knockout_print_logic.dart';
@@ -83,10 +83,20 @@ class _KnockoutPageState extends State<KnockoutPage> {
         actions: [
           if (_selectedMatchIds.isNotEmpty)
             IconButton(
-              onPressed: () => KnockoutPrintLogic.showPrintPreview(
-                context, widget.tournamentTitle, widget.rounds, _selectedMatchIds, 
-                () { setState(() {}); widget.onDataChanged(); } // 인쇄 시 상태 갱신 및 저장
-              ),
+              onPressed: () async {
+                // 인쇄 미리보기 화면으로 이동하고 돌아올 때까지 대기
+                await KnockoutPrintLogic.showPrintPreview(
+                  context, 
+                  widget.tournamentTitle, 
+                  widget.rounds, 
+                  _selectedMatchIds, 
+                  () { setState(() {}); widget.onDataChanged(); }
+                );
+                // 인쇄 화면에서 복귀한 후 선택된 항목들을 초기화
+                setState(() {
+                  _selectedMatchIds.clear();
+                });
+              },
               icon: const material.Icon(Icons.print, color: Colors.green),
               tooltip: '${_selectedMatchIds.length}개 경기 출력',
             ),
@@ -354,19 +364,13 @@ class BracketLinkPainter extends material.CustomPainter {
         final match = rounds[r].matches[m]; if (match.nextMatchId == null) continue;
         final nextMatch = rounds[r + 1].matches.firstWhere((nm) => nm.id == match.nextMatchId);
         double sX = r * roundWidth + matchWidth, sY = (m * math.pow(2, r) + (math.pow(2, r) - 1) / 2) * itemHeight + 20 + (matchHeight / 2);
-        double eX = (r + 1) * roundWidth, eY = ((m ~/ 2) * math.pow(2, r + 1) + (math.pow(2, r + 1) - 1) / 2) * itemHeight + 20 + (matchHeight / 2);
+        double eX = (r + 1) * roundWidth, eY = (m ~/ 2 * math.pow(2, r + 1) + (math.pow(2, r + 1) - 1) / 2) * itemHeight + 20 + (matchHeight / 2);
+        bool isActive = (match.status == MatchStatus.completed || match.status == MatchStatus.withdrawal) && nextMatch.status != MatchStatus.pending;
         final path = Path()..moveTo(sX, sY)..lineTo(sX + (eX - sX) / 2, sY)..lineTo(sX + (eX - sX) / 2, eY)..lineTo(eX, eY);
-        bool shouldHighlight = false;
-        if (nextMatch.status == MatchStatus.completed || nextMatch.status == MatchStatus.withdrawal) {
-          if (nextMatch.winner != null) {
-            if (match.nextMatchSlot == 1 && nextMatch.winner == nextMatch.player1) shouldHighlight = true;
-            if (match.nextMatchSlot == 2 && nextMatch.winner == nextMatch.player2) shouldHighlight = true;
-          }
-        }
-        canvas.drawPath(path, shouldHighlight ? pActive : pBase);
+        canvas.drawPath(path, isActive ? pActive : pBase);
       }
     }
   }
   @override
-  bool shouldRepaint(material.CustomPainter old) => true;
+  bool shouldRepaint(CustomPainter oldDelegate) => true;
 }

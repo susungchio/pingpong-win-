@@ -73,7 +73,7 @@ class _GroupStagePageState extends State<GroupStagePage> {
           if (_currentKnockoutRounds != null)
             IconButton(
               icon: const Icon(Icons.arrow_forward_rounded, size: 32, color: Color(0xFF1A535C)),
-              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => KnockoutPage(tournamentTitle: widget.tournamentTitle, rounds: _currentKnockoutRounds!))),
+              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => KnockoutPage(tournamentTitle: widget.tournamentTitle, rounds: _currentKnockoutRounds!, onDataChanged: () {}, events: []))),
             ),
         ],
       ),
@@ -128,7 +128,7 @@ class _GroupStagePageState extends State<GroupStagePage> {
               var targetRounds = TournamentLogic.generateKnockout(qualified);
               setState(() => _currentKnockoutRounds = targetRounds);
               widget.onKnockoutUpdate(targetRounds, qualified);
-              Navigator.push(context, MaterialPageRoute(builder: (context) => KnockoutPage(tournamentTitle: widget.tournamentTitle, rounds: targetRounds)));
+              Navigator.push(context, MaterialPageRoute(builder: (context) => KnockoutPage(tournamentTitle: widget.tournamentTitle, rounds: targetRounds, onDataChanged: () {}, events: [])));
             }
           },
           style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1A535C), foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 56)),

@@ -16,6 +16,52 @@ class Player {
   int get hashCode => id.hashCode;
 }
 
+class MasterPlayer {
+  final int? id; 
+  final String playerNumber;
+  final String city;        
+  final String affiliation; 
+  final String name;        
+  final String gender;      
+  final String tier;        
+  final String points;
+
+  MasterPlayer({
+    this.id,
+    required this.playerNumber,
+    required this.city,
+    required this.affiliation,
+    required this.name,
+    required this.gender,
+    required this.tier,
+    required this.points,
+  });
+
+  Map<String, dynamic> toJson() => {
+    if (id != null) 'id': id,
+    'playerNumber': playerNumber,
+    'city': city,
+    'affiliation': affiliation,
+    'name': name,
+    'gender': gender,
+    'tier': tier,
+    'points': points,
+  };
+
+  factory MasterPlayer.fromJson(Map<String, dynamic> json) => MasterPlayer(
+    id: json['id'],
+    playerNumber: json['playerNumber']?.toString() ?? '',
+    city: json['city'] ?? '',
+    affiliation: json['affiliation'] ?? '',
+    name: json['name'] ?? '',
+    gender: json['gender'] ?? '',
+    tier: json['tier'] ?? '',
+    points: json['points'] ?? '',
+  );
+
+  String get uniqueKey => '$name|$affiliation';
+}
+
 enum MatchStatus { pending, inProgress, completed, withdrawal }
 
 class Match {
@@ -27,8 +73,8 @@ class Match {
   MatchStatus status;
   Player? winner;
   String? nextMatchId;
-  int? nextMatchSlot; // 1: player1, 2: player2
-  int printCount; // [추가] 인쇄 횟수 추적
+  int? nextMatchSlot; 
+  int printCount; 
 
   Match({
     required this.id,
@@ -40,7 +86,7 @@ class Match {
     this.winner,
     this.nextMatchId,
     this.nextMatchSlot,
-    this.printCount = 0, // [기본값 0]
+    this.printCount = 0,
   });
 
   bool get isBye => (player1 == null && player2 != null) || (player1 != null && player2 == null);
@@ -62,23 +108,31 @@ class Round {
 }
 
 class TournamentSettings {
-  int groupSize; // 예선 조별 인원 (3-5)
-  int advancingCount; // 본선 진출 인원 (2-5)
-  int setsToWin; // 2: 3전 2선승, 3: 5전 3선승
+  int groupSize; 
+  int advancingCount; 
+  int setsToWin; 
   bool randomSeeding;
+  bool skipGroupStage;
+  /// 부수설정 패널 표시 여부 (체크 시 17가지 부수 체크 목록 확장)
+  bool showTierFilter;
+  /// 부수설정에서 선택된 부수 명칭 목록 (1개 이상이면 아이콘/텍스트 강조)
+  List<String> allowedTiers;
 
   TournamentSettings({
     this.groupSize = 3,
     this.advancingCount = 2,
     this.setsToWin = 2,
     this.randomSeeding = true,
-  });
+    this.skipGroupStage = false,
+    this.showTierFilter = false,
+    List<String>? allowedTiers,
+  }) : allowedTiers = allowedTiers ?? [];
 }
 
-/// 여러 경기 종목(이벤트)을 관리하기 위한 클래스
 class TournamentEvent {
   final String id;
-  String name; // 경기 종목 이름 (예: 남자 1~3부)
+  String name; 
+  int teamSize; 
   List<Player> players;
   List<Group>? groups;
   List<Round>? knockoutRounds;
@@ -88,6 +142,7 @@ class TournamentEvent {
   TournamentEvent({
     required this.id,
     required this.name,
+    this.teamSize = 1,
     List<Player>? players,
     this.groups,
     this.knockoutRounds,
