@@ -1,13 +1,11 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:pdf/pdf.dart';
 import 'ctrl_wheel_zoom.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
 import 'models.dart';
 import 'tournament_logic.dart';
 import 'knockout_page.dart';
 import 'match_sheet_page.dart';
+import 'main.dart';
 
 class GroupStageTabletView extends StatefulWidget {
   final String tournamentBaseTitle;
@@ -84,7 +82,7 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
     setState(() {
       _currentEvent.groups ??= [];
       int nextGroupNum = _currentEvent.groups!.length + 1;
-      _currentEvent.groups!.add(Group(name: '예선 ${nextGroupNum}조', players: [], matches: []));
+      _currentEvent.groups!.add(Group(name: '예선 $nextGroupNum조', players: [], matches: []));
       _refreshRankings();
     });
     widget.onDataChanged();
@@ -100,7 +98,11 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
 
     return PopScope(
       canPop: !hasWaiting,
-      onPopInvoked: (didPop) { if (!didPop && hasWaiting) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('대기 명단에 선수가 있습니다. 모든 선수를 조에 배정해주세요.'))); },
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && hasWaiting) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('대기 명단에 선수가 있습니다. 모든 선수를 조에 배정해주세요.')));
+        }
+      },
       child: Scaffold(
         backgroundColor: const Color(0xFFF0F4F8),
         appBar: AppBar(
@@ -120,13 +122,14 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
               child: const Text('본선토너먼트', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
             ),
             const VerticalDivider(color: Colors.white24, indent: 15, endIndent: 15),
-            _appBarAction(Icons.group_add_outlined, '조 추가', Colors.cyanAccent, _addNewGroup),
+            // 본선 토너먼트가 시작되면 조 추가 비활성화
+            _appBarAction(Icons.group_add_outlined, '조 추가', Colors.cyanAccent, (_currentEvent.knockoutRounds != null && _currentEvent.knockoutRounds!.isNotEmpty) ? null : _addNewGroup),
             const VerticalDivider(color: Colors.white24, indent: 15, endIndent: 15),
             if (!isSkipMode) IconButton(icon: const Icon(Icons.casino_outlined, color: Colors.orangeAccent), onPressed: hasWaiting ? null : _fillRandomScores, tooltip: '테스트 점수 입력'),
             _appBarAction(Icons.assignment_outlined, '기록지 출력', Colors.amber, hasWaiting ? null : () {
               Navigator.push(context, MaterialPageRoute(builder: (context) => MatchSheetPage(tournamentTitle: '${widget.tournamentBaseTitle} - ${_currentEvent.name}', groups: _currentEvent.groups!, knockoutRounds: _currentEvent.knockoutRounds)));
             }),
-            if (!groups.isEmpty) ...[
+            if (groups.isNotEmpty) ...[
               const VerticalDivider(color: Colors.white24, indent: 15, endIndent: 15),
               IconButton(
                 icon: Icon(_stickyPanelVisible ? Icons.visibility : Icons.visibility_off, color: Colors.white),
@@ -141,7 +144,9 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
             ? Column(children: [_buildEventTabBar(), const Expanded(child: Center(child: Text('예선 조가 없습니다. [조 추가]를 눌러주세요.')))])
             : Builder(
                 builder: (context) {
-                  while (_groupCardKeys.length < groups.length) _groupCardKeys.add(GlobalKey());
+                  while (_groupCardKeys.length < groups.length) {
+                    _groupCardKeys.add(GlobalKey());
+                  }
                   return Stack(
                     children: [
                       CustomScrollView(
@@ -203,11 +208,11 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
               ),
         bottomNavigationBar: Container(
           padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 20),
-          decoration: BoxDecoration(color: Colors.white, boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -5))]),
+          decoration: BoxDecoration(color: Colors.white, boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, -5))]),
           child: ElevatedButton.icon(
             onPressed: (!canProceed || hasWaiting) ? null : _generateKnockout,
             icon: Icon(hasWaiting ? Icons.warning_amber_rounded : Icons.account_tree_rounded),
-            label: Text(hasWaiting ? '대기 명단 배정 필요' : '본선 토너먼트 생성 및 이동', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            label: Text(hasWaiting ? '대기 명단 배정 필요' : '본선 진출 생성 및 이동', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             style: ElevatedButton.styleFrom(backgroundColor: hasWaiting ? Colors.redAccent.shade100 : const Color(0xFF1A535C), foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 64), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
           ),
         ),
@@ -234,7 +239,6 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
     ]),
   );
 
-  /// 오른쪽 스티키 패널: 탭 메뉴(참가 현황, 선수 선택) 추가
   Widget _buildRightStickyProgressPanel(List<Group> groups) {
     return Opacity(
       opacity: _stickyPanelOpacity.clamp(0.0, 1.0),
@@ -305,8 +309,6 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
   Widget _buildPlayerSelectionTab() {
     final query = _rightPanelSearchQuery.toLowerCase();
     List<Map<String, dynamic>> allPlayersInfo = [];
-    
-    // 각 조의 선수들
     if (_currentEvent.groups != null) {
       for (int i = 0; i < _currentEvent.groups!.length; i++) {
         for (var p in _currentEvent.groups![i].players) {
@@ -316,14 +318,11 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
         }
       }
     }
-    
-    // 대기 선수들
     for (var p in _waitingPlayers) {
       if (query.isEmpty || p.name.toLowerCase().contains(query) || p.affiliation.toLowerCase().contains(query)) {
         allPlayersInfo.add({'player': p, 'groupIdx': -1, 'groupName': '대기 명단'});
       }
     }
-
     return Column(
       children: [
         Padding(
@@ -350,7 +349,6 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
               final Player p = info['player'];
               final String gName = info['groupName'];
               final int gIdx = info['groupIdx'];
-              
               return ListTile(
                 dense: true,
                 visualDensity: VisualDensity.compact,
@@ -378,19 +376,11 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
     if (ctx != null) Scrollable.ensureVisible(ctx, alignment: 0.2, duration: const Duration(milliseconds: 400), curve: Curves.easeInOut);
   }
 
-  /// 조 번호가 적힌 사각형. 해당 조 경기 모두 완료 시 파란색. 클릭 시 해당 조 카드로 스크롤
   Widget _buildGroupProgressBox(Group group, int groupNumber, {VoidCallback? onTap}) {
-    final allDone = group.matches.isEmpty ||
-        group.matches.every((m) => m.status == MatchStatus.completed || m.status == MatchStatus.withdrawal);
+    final allDone = group.matches.isEmpty || group.matches.every((m) => m.status == MatchStatus.completed || m.status == MatchStatus.withdrawal);
     final box = Container(
-      width: 36,
-      height: 36,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: allDone ? Colors.blue : Colors.grey.shade200,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: allDone ? Colors.blue.shade700 : Colors.grey.shade400),
-      ),
+      width: 36, height: 36, alignment: Alignment.center,
+      decoration: BoxDecoration(color: allDone ? Colors.blue : Colors.grey.shade200, borderRadius: BorderRadius.circular(8), border: Border.all(color: allDone ? Colors.blue.shade700 : Colors.grey.shade400)),
       child: Text('$groupNumber', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: allDone ? Colors.white : Colors.grey.shade700)),
     );
     if (onTap == null) return box;
@@ -440,7 +430,7 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
             ]),
           ]),
         ),
-        Padding(padding: const EdgeInsets.all(16), child: Column(children: [_buildRankingTable(rankings, group, groupIdx), const SizedBox(height: 16), const Divider(), ...group.matches.map((m) => _buildMatchTile(m))])),
+        Padding(padding: const EdgeInsets.all(16), child: Column(children: [_buildRankingTable(rankings, group, groupIdx), const SizedBox(height: 16), const Divider(), ...group.matches.map((m) => _buildMatchTile(m, group))])),
       ]),
     );
   }
@@ -463,72 +453,32 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
 
   Widget _tableCell(String t, {bool isBold = false, Color color = Colors.black, double fontSize = 13}) => TableCell(child: Center(child: Padding(padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 2), child: Text(t, style: TextStyle(fontWeight: isBold ? FontWeight.bold : FontWeight.normal, color: color, fontSize: fontSize)))));
 
-  Widget _buildMatchTile(Match m) {
+  Widget _buildMatchTile(Match m, Group group) {
     if (!_isTeamMatch) {
-      return Container(margin: const EdgeInsets.only(bottom: 4), decoration: BoxDecoration(color: const Color(0xFFF8F9FA), borderRadius: BorderRadius.circular(8)), child: ListTile(dense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 12), visualDensity: VisualDensity.compact, title: Row(children: [Expanded(child: Text("${m.player1?.name ?? 'BYE'} (${m.player1?.affiliation ?? ''})", textAlign: TextAlign.right, style: const TextStyle(fontSize: 13))), Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2), margin: const EdgeInsets.symmetric(horizontal: 10), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.grey.shade300)), child: Text('${m.score1} : ${m.score2}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.redAccent))), Expanded(child: Text("${m.player2?.name ?? 'BYE'} (${m.player2?.affiliation ?? ''})", textAlign: TextAlign.left, style: const TextStyle(fontSize: 13)))]), onTap: () => _showScoreDialog(m)));
+      return Container(margin: const EdgeInsets.only(bottom: 4), decoration: BoxDecoration(color: const Color(0xFFF8F9FA), borderRadius: BorderRadius.circular(8)), child: ListTile(dense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 12), visualDensity: VisualDensity.compact, title: Row(children: [Expanded(child: Text("${m.player1?.name ?? 'BYE'} (${m.player1?.affiliation ?? ''})", textAlign: TextAlign.right, style: const TextStyle(fontSize: 13))), Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2), margin: const EdgeInsets.symmetric(horizontal: 10), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.grey.shade300)), child: Text('${m.score1} : ${m.score2}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.redAccent))), Expanded(child: Text("${m.player2?.name ?? 'BYE'} (${m.player2?.affiliation ?? ''})", textAlign: TextAlign.left, style: const TextStyle(fontSize: 13)))]), onTap: () => _maybeShowScoreDialog(m, group)));
     }
-
     return InkWell(
-      onTap: () => _showScoreDialog(m),
+      onTap: () => _maybeShowScoreDialog(m, group),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white, borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey.shade200),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 5, offset: const Offset(0, 2))],
-        ),
-        child: Column(
-          children: [
-            Row(children: [
-              Expanded(child: _clubLabel(m.player1?.affiliation ?? 'BYE')),
-              const SizedBox(width: 40),
-              Expanded(child: _clubLabel(m.player2?.affiliation ?? 'BYE')),
-            ]),
-            const SizedBox(height: 12),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Expanded(child: _playerNamesGrid(m.player1?.name ?? '')),
-                Container(
-                  width: 80, alignment: Alignment.center,
-                  child: Text(m.status == MatchStatus.withdrawal ? '기권' : '${m.score1} : ${m.score2}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 22, color: Colors.redAccent)),
-                ),
-                Expanded(child: _playerNamesGrid(m.player2?.name ?? '')),
-              ],
-            ),
-          ],
-        ),
+        margin: const EdgeInsets.only(bottom: 12), padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade200), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 5, offset: const Offset(0, 2))]),
+        child: Column(children: [
+          Row(children: [Expanded(child: _clubLabel(m.player1?.affiliation ?? 'BYE')), const SizedBox(width: 40), Expanded(child: _clubLabel(m.player2?.affiliation ?? 'BYE'))]),
+          const SizedBox(height: 12),
+          Row(crossAxisAlignment: CrossAxisAlignment.center, children: [Expanded(child: _playerNamesGrid(m.player1?.name ?? '')), Container(width: 80, alignment: Alignment.center, child: Text(m.status == MatchStatus.withdrawal ? '기권' : '${m.score1} : ${m.score2}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 22, color: Colors.redAccent))), Expanded(child: _playerNamesGrid(m.player2?.name ?? ''))]),
+        ]),
       ),
     );
   }
 
-  Widget _clubLabel(String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 16),
-      decoration: const ShapeDecoration(color: Color(0xFF1A535C), shape: StadiumBorder()),
-      child: Text(text, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
-    );
-  }
+  Widget _clubLabel(String text) => Container(padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 16), decoration: const ShapeDecoration(color: Color(0xFF1A535C), shape: StadiumBorder()), child: Text(text, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis));
 
   Widget _playerNamesGrid(String names) {
     if (names.isEmpty) return const SizedBox.shrink();
     List<String> list = names.split(',').map((s) => s.trim()).toList();
     List<Widget> rows = [];
     for (int i = 0; i < list.length && i < 6; i += 2) {
-      rows.add(Padding(
-        padding: const EdgeInsets.only(bottom: 2),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(list[i], style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.black87)),
-            if (i + 1 < list.length) ...[
-              const SizedBox(width: 8),
-              Text(list[i + 1], style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.black87)),
-            ],
-          ],
-        ),
-      ));
+      rows.add(Padding(padding: const EdgeInsets.only(bottom: 2), child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [Text(list[i], style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.black87)), if (i + 1 < list.length) ...[const SizedBox(width: 8), Text(list[i + 1], style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.black87))]])));
     }
     return Column(mainAxisSize: MainAxisSize.min, children: rows);
   }
@@ -538,7 +488,6 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
     final group = _currentEvent.groups![currentGroupIdx];
     final bool canAdd = group.players.length < maxGroupSize;
     final bool hasRecord = _hasMatchRecord(player, group);
-
     showDialog(context: context, builder: (ctx) => AlertDialog(title: Text('${_isTeamMatch ? player.affiliation : player.name} 관리'), content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
       if (hasRecord) const Padding(padding: EdgeInsets.all(12), child: Text('⚠️ 이 선수는 이미 경기를 치렀으므로 조 이동이 불가능합니다.', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 13))),
       ListTile(leading: Icon(Icons.logout, color: hasRecord ? Colors.grey : Colors.orange), title: Text('대기 명단으로 보내기', style: TextStyle(color: hasRecord ? Colors.grey : Colors.black)), onTap: hasRecord ? null : () {
@@ -561,34 +510,165 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
           })),
         ],
       ]
-    ])), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소'))]));
+    ])), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('닫기'))]));
   }
 
   void _moveRank(int gIdx, int cur, int dir) { setState(() { final list = _manualRankings[gIdx]!; final item = list.removeAt(cur); list.insert(cur + dir, item); widget.onDataChanged(); }); }
-  void _showScoreDialog(Match m) { int s1 = m.score1; int s2 = m.score2; showDialog(context: context, builder: (ctx) => StatefulBuilder(builder: (ctx, setS) => AlertDialog(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), title: const Text('결과 입력'), content: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [_counterColumn(m.player1, s1, (v) => setS(() => s1 = v)), const Text(':'), _counterColumn(m.player2, s2, (v) => setS(() => s2 = v))]), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')), ElevatedButton(onPressed: () { setState(() { m.score1 = s1; m.score2 = s2; m.status = MatchStatus.completed; m.winner = s1 > s2 ? m.player1 : m.player2; _refreshRankings(); }); widget.onDataChanged(); Navigator.pop(ctx); }, child: const Text('저장'))]))); }
-  Widget _counterColumn(Player? p, int val, Function(int) onU) => Column(mainAxisSize: MainAxisSize.min, children: [Text(p?.name ?? '?', style: const TextStyle(fontSize: 12)), IconButton(onPressed: () => onU(val + 1), icon: const Icon(Icons.add_circle_outline)), Text('$val', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)), IconButton(onPressed: () => onU(val > 0 ? val - 1 : 0), icon: const Icon(Icons.remove_circle_outline))]);
+
+  /// 본선 진행 중이면 관리자 비밀번호 확인 후 점수 입력창 표시
+  void _maybeShowScoreDialog(Match m, Group group) {
+    final knockoutStarted = _currentEvent.knockoutRounds != null && _currentEvent.knockoutRounds!.isNotEmpty;
+    final savedPassword = systemAdminPasswordNotifier.value;
+    if (!knockoutStarted || savedPassword == null || savedPassword.isEmpty) {
+      _showScoreDialog(m, group);
+      return;
+    }
+    final controller = TextEditingController();
+    showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('관리자 비밀번호'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('본선 토너먼트가 진행 중입니다. 예선 경기 결과를 변경하려면 관리자 비밀번호를 입력하세요.', style: TextStyle(fontSize: 13)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              obscureText: true,
+              decoration: const InputDecoration(
+                hintText: '비밀번호',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+              onSubmitted: (_) => Navigator.pop(ctx, controller.text),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text('확인'),
+          ),
+        ],
+      ),
+    ).then((result) {
+      controller.dispose();
+      if (result == null || !mounted) return;
+      if (result == savedPassword) {
+        _showScoreDialog(m, group);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('비밀번호가 일치하지 않습니다.')),
+        );
+      }
+    });
+  }
+
+  /// 본선 토너먼트 점수입력창과 동일한 디자인: 모달 바텀시트, 선수 정보·VS·카운터·기권 버튼·점수 저장 및 확정
+  /// 기권 저장 시 같은 조 내 해당 선수의 나머지 경기도 모두 기권 처리
+  void _showScoreDialog(Match m, Group group) {
+    int s1 = m.score1 == -1 ? 0 : m.score1;
+    int s2 = m.score2 == -1 ? 0 : m.score2;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setS) => Container(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                Expanded(child: _scoreDialogPlayerInfo(m.player1, textAlign: TextAlign.right)),
+                const Padding(padding: EdgeInsets.symmetric(horizontal: 20), child: Text('VS', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.grey))),
+                Expanded(child: _scoreDialogPlayerInfo(m.player2, textAlign: TextAlign.left)),
+              ]),
+              const SizedBox(height: 40),
+              Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+                _scoreDialogCounter((v) => setS(() => s1 = v), s1),
+                const Text(':', style: TextStyle(fontSize: 50, fontWeight: FontWeight.bold)),
+                _scoreDialogCounter((v) => setS(() => s2 = v), s2),
+              ]),
+              const SizedBox(height: 30),
+              Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                ElevatedButton.icon(onPressed: () => setS(() { s1 = -1; s2 = 0; }), icon: const Icon(Icons.flag), label: const Text('P1 기권'), style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade50, foregroundColor: Colors.red)),
+                ElevatedButton.icon(onPressed: () => setS(() { s1 = 0; s2 = -1; }), icon: const Icon(Icons.flag), label: const Text('P2 기권'), style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade50, foregroundColor: Colors.red)),
+              ]),
+              const SizedBox(height: 40),
+              ElevatedButton(
+                onPressed: () {
+                  setState(() {
+                    m.score1 = s1;
+                    m.score2 = s2;
+                    if (s1 == -1 || s2 == -1) {
+                      m.status = MatchStatus.withdrawal;
+                      m.winner = s1 == -1 ? m.player2 : m.player1;
+                      // 같은 조 내 기권한 선수의 나머지 경기도 기권 처리
+                      final withdrawingPlayer = s1 == -1 ? m.player1 : m.player2;
+                      if (withdrawingPlayer != null) {
+                        for (final other in group.matches) {
+                          if (identical(other, m)) continue;
+                          if (other.player1 == withdrawingPlayer) {
+                            other.score1 = -1;
+                            other.score2 = 0;
+                            other.status = MatchStatus.withdrawal;
+                            other.winner = other.player2;
+                          } else if (other.player2 == withdrawingPlayer) {
+                            other.score1 = 0;
+                            other.score2 = -1;
+                            other.status = MatchStatus.withdrawal;
+                            other.winner = other.player1;
+                          }
+                        }
+                      }
+                    } else {
+                      m.status = MatchStatus.completed;
+                      m.winner = s1 > s2 ? m.player1 : m.player2;
+                    }
+                    _refreshRankings();
+                  });
+                  Navigator.pop(context);
+                  widget.onDataChanged();
+                },
+                style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 64), backgroundColor: const Color(0xFF1A535C), foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                child: const Text('점수 저장 및 확정', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _scoreDialogPlayerInfo(Player? p, {required TextAlign textAlign}) => Column(
+    crossAxisAlignment: textAlign == TextAlign.right ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+    children: [
+      Text(_isTeamMatch ? (p?.affiliation ?? 'TBD') : (p?.name ?? 'TBD'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+      Text(_isTeamMatch ? (p?.name ?? '') : (p?.affiliation ?? ''), style: const TextStyle(fontSize: 15, color: Colors.orange, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis),
+    ],
+  );
+
+  Widget _scoreDialogCounter(void Function(int) onU, int v) => Column(
+    children: [
+      IconButton(onPressed: () => onU(v + 1), icon: const Icon(Icons.add_circle, color: Color(0xFF4ECDC4), size: 56)),
+      Text(v == -1 ? '기권' : '$v', style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: Color(0xFF1A535C))),
+      IconButton(onPressed: () => onU(v > 0 ? v - 1 : 0), icon: const Icon(Icons.remove_circle, color: Colors.redAccent, size: 56)),
+    ],
+  );
+
   void _fillRandomScores() { setState(() { final random = math.Random(); if (_currentEvent.groups == null) return; for (int i = 0; i < _currentEvent.groups!.length; i++) { for (var match in _currentEvent.groups![i].matches) { if (match.status == MatchStatus.pending) { bool p1Wins = random.nextBool(); match.score1 = p1Wins ? 3 : 1; match.score2 = p1Wins ? 1 : 3; match.winner = p1Wins ? match.player1 : match.player2; match.status = MatchStatus.completed; } } _manualRankings[i] = TournamentLogic.getGroupRankings(_currentEvent.groups![i]); } }); widget.onDataChanged(); }
   void _generateKnockout() { List<Player> qualified = []; if (_currentEvent.settings.skipGroupStage) { qualified = List.from(_currentEvent.players); } else { for (int i = 0; i < (_currentEvent.groups?.length ?? 0); i++) { qualified.addAll((_manualRankings[i] ?? TournamentLogic.getGroupRankings(_currentEvent.groups![i])).take(_currentEvent.settings.advancingCount)); } } var rounds = TournamentLogic.generateKnockout(qualified); setState(() { _currentEvent.knockoutRounds = rounds; _currentEvent.lastQualified = qualified; }); widget.onDataChanged(); Navigator.push(context, MaterialPageRoute(builder: (context) => KnockoutPage(tournamentTitle: '${widget.tournamentBaseTitle} - ${_currentEvent.name}', rounds: rounds, onDataChanged: widget.onDataChanged, events: widget.allEvents))); }
 }
 
-/// 스크롤 시 상단에 고정되는 헤더용 델리게이트 (선택 종목 인덱스 변경 시에도 재빌드)
 class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
-  final double height;
-  final int selectedIndex;
-  final Widget child;
-
+  final double height; final int selectedIndex; final Widget child;
   _StickyHeaderDelegate({required this.height, required this.selectedIndex, required this.child});
-
-  @override
-  double get maxExtent => height;
-
-  @override
-  double get minExtent => height;
-
-  @override
-  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) => child;
-
-  @override
-  bool shouldRebuild(covariant _StickyHeaderDelegate old) =>
-      old.height != height || old.selectedIndex != selectedIndex;
+  @override double get maxExtent => height;
+  @override double get minExtent => height;
+  @override Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) => child;
+  @override bool shouldRebuild(covariant _StickyHeaderDelegate old) => old.height != height || old.selectedIndex != selectedIndex;
 }

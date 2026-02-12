@@ -59,6 +59,68 @@ Future<void> loadFontSettings() async {
   }
 }
 
+/// 프로그램설정에서 체크 해제한 경기종목 id 집합. 이 id는 예선/본선에서 제외되고 메인에서 빨간색 표시.
+final ValueNotifier<Set<String>> eventUncheckedIdsNotifier = ValueNotifier<Set<String>>({});
+
+Future<File> _getEventDisplayConfigFile() async {
+  final directory = await getApplicationDocumentsDirectory();
+  return File('${directory.path}/event_display_checked.json');
+}
+
+Future<void> saveEventDisplayChecked(Set<String> uncheckedIds) async {
+  try {
+    final file = await _getEventDisplayConfigFile();
+    await file.writeAsString(jsonEncode(uncheckedIds.toList()));
+  } catch (e) {
+    debugPrint('경기종목 표시 저장 오류: $e');
+  }
+}
+
+Future<void> loadEventDisplayChecked() async {
+  try {
+    final file = await _getEventDisplayConfigFile();
+    if (await file.exists()) {
+      final content = await file.readAsString();
+      final List<dynamic> list = jsonDecode(content);
+      eventUncheckedIdsNotifier.value = Set<String>.from(list.map((e) => e.toString()));
+    }
+  } catch (e) {
+    debugPrint('경기종목 표시 로드 오류: $e');
+  }
+}
+
+/// 시스템관리 비밀번호 (프로그램설정에서 설정, 저장 후 다른 화면에서 인증용으로 사용)
+final ValueNotifier<String?> systemAdminPasswordNotifier = ValueNotifier<String?>(null);
+
+Future<File> _getSystemAdminPasswordFile() async {
+  final directory = await getApplicationDocumentsDirectory();
+  return File('${directory.path}/system_admin_password.json');
+}
+
+Future<void> saveSystemAdminPassword(String password) async {
+  try {
+    final file = await _getSystemAdminPasswordFile();
+    await file.writeAsString(jsonEncode({'password': password}));
+    systemAdminPasswordNotifier.value = password.isEmpty ? null : password;
+  } catch (e) {
+    debugPrint('시스템관리 비밀번호 저장 오류: $e');
+  }
+}
+
+Future<void> loadSystemAdminPassword() async {
+  try {
+    final file = await _getSystemAdminPasswordFile();
+    if (await file.exists()) {
+      final content = await file.readAsString();
+      final Map<String, dynamic> json = jsonDecode(content);
+      final pwd = json['password']?.toString();
+      systemAdminPasswordNotifier.value = (pwd == null || pwd.isEmpty) ? null : pwd;
+    }
+  } catch (e) {
+    debugPrint('시스템관리 비밀번호 로드 오류: $e');
+  }
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -69,6 +131,8 @@ void main() async {
   }
 
   await loadFontSettings();
+  await loadEventDisplayChecked();
+  await loadSystemAdminPassword();
 
   if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
     await windowManager.ensureInitialized();

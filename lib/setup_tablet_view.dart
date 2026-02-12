@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'main.dart';
 import 'models.dart';
 import 'tournament_logic.dart';
 import 'group_stage_page.dart';
@@ -41,8 +42,6 @@ class _SetupTabletViewState extends State<SetupTabletView> with SetupLogicMixin<
   /// true면 왼쪽(메인 입력) 영역을 탭/포커스한 상태 → 선수선택란 확장 안 함
   bool _leftPanelTapped = false;
   final GlobalKey _leftPanelKey = GlobalKey();
-  /// 체크된 진행종목 id 집합 (체크 시 해당 종목 텍스트 빨간색)
-  final Set<String> _checkedEventIds = {};
 
   @override
   void initState() {
@@ -90,13 +89,7 @@ class _SetupTabletViewState extends State<SetupTabletView> with SetupLogicMixin<
   }
 
   @override
-  List<String> get checkedEventIdsForSave => _checkedEventIds.toList();
-
-  @override
-  void afterLoadFromFile(Map<String, dynamic> data) {
-    _checkedEventIds.clear();
-    _checkedEventIds.addAll(List<String>.from(data['checkedEventIds'] ?? []));
-  }
+  void afterLoadFromFile(Map<String, dynamic> data) {}
 
   @override
   void dispose() {
@@ -225,7 +218,8 @@ class _SetupTabletViewState extends State<SetupTabletView> with SetupLogicMixin<
     }
     currentEvent!.groups ??= TournamentLogic.generateGroups(currentEvent!.players, currentEvent!.settings);
     saveData();
-    final visibleEvents = events.where((e) => !_checkedEventIds.contains(e.id)).toList();
+    final unchecked = eventUncheckedIdsNotifier.value;
+    final visibleEvents = events.where((e) => !unchecked.contains(e.id)).toList();
     final eventsToShow = visibleEvents.isEmpty ? List<TournamentEvent>.from(events) : visibleEvents;
     int initialIdx = 0;
     if (selectedEventIdx < events.length) {
@@ -244,7 +238,8 @@ class _SetupTabletViewState extends State<SetupTabletView> with SetupLogicMixin<
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('본선 대진이 없습니다. 예선전에서 본선 진출 생성 후 이동해주세요.')));
       return;
     }
-    final visibleEvents = events.where((e) => !_checkedEventIds.contains(e.id)).toList();
+    final unchecked = eventUncheckedIdsNotifier.value;
+    final visibleEvents = events.where((e) => !unchecked.contains(e.id)).toList();
     final eventsToShow = visibleEvents.isEmpty ? List<TournamentEvent>.from(events) : visibleEvents;
     int initialIdx = eventsToShow.indexWhere((e) => e.id == currentEvent!.id);
     if (initialIdx < 0) initialIdx = 0;
@@ -301,7 +296,7 @@ class _SetupTabletViewState extends State<SetupTabletView> with SetupLogicMixin<
         const Divider(color: Colors.white24, height: 40, indent: 30, endIndent: 30),
         _sidebarItem(Icons.edit_document, '대회 설정 및 참가 등록', !_isDbManagementMode, () => setState(() { _isDbManagementMode = false; })),
         _sidebarItem(Icons.storage_rounded, '기초 선수 DB 관리', _isDbManagementMode, () { setState(() { _isDbManagementMode = true; _refreshMasterList(); _checkDuplicatesCount(); }); }),
-        _sidebarItem(Icons.settings_applications_rounded, '프로그램 설정', false, () { Navigator.push(context, MaterialPageRoute(builder: (ctx) => const ProgramSettingsPage())); }),
+        _sidebarItem(Icons.settings_applications_rounded, '프로그램 설정', false, () { Navigator.push(context, MaterialPageRoute(builder: (ctx) => ProgramSettingsPage(events: events))); }),
         const Divider(color: Colors.white24, height: 30),
         if (!_isDbManagementMode) ...[
           _sidebarItem(Icons.save_rounded, '현재 상태 저장', false, () async { await saveData(); _refreshSavedList(); }),
@@ -428,17 +423,18 @@ class _SetupTabletViewState extends State<SetupTabletView> with SetupLogicMixin<
     );
   }
 
+  /// 경기종목 칩. 표시여부/색상은 프로그램설정의 체크상태(eventUncheckedIdsNotifier)에 따름.
   Widget _buildEventSelector() {
-    return Wrap(spacing: 12, runSpacing: 12, children: [
-      ...events.asMap().entries.map((e) {
-        final isSelected = selectedEventIdx == e.key;
-        final isChecked = _checkedEventIds.contains(e.value.id);
-        return Padding(
-          padding: const EdgeInsets.only(right: 4),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              GestureDetector(
+    return ValueListenableBuilder<Set<String>>(
+      valueListenable: eventUncheckedIdsNotifier,
+      builder: (context, uncheckedIds, _) {
+        return Wrap(spacing: 12, runSpacing: 12, children: [
+          ...events.asMap().entries.map((e) {
+            final isSelected = selectedEventIdx == e.key;
+            final isExcluded = uncheckedIds.contains(e.value.id);
+            return Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: GestureDetector(
                 onLongPress: () => _deleteEventDialog(e.key),
                 child: ChoiceChip(
                   label: Padding(
@@ -447,42 +443,22 @@ class _SetupTabletViewState extends State<SetupTabletView> with SetupLogicMixin<
                       e.value.name,
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        color: isChecked ? Colors.red : (isSelected ? Colors.white : Colors.black),
+                        color: isExcluded ? Colors.red : (isSelected ? Colors.white : Colors.black),
                       ),
                     ),
                   ),
                   selected: isSelected,
                   selectedColor: const Color(0xFF1A535C),
-                  labelStyle: TextStyle(color: isChecked ? Colors.red : (isSelected ? Colors.white : Colors.black)),
+                  labelStyle: TextStyle(color: isExcluded ? Colors.red : (isSelected ? Colors.white : Colors.black)),
                   onSelected: (v) => setState(() => selectedEventIdx = e.key),
                 ),
               ),
-              if (isSelected) ...[
-                const SizedBox(width: 4),
-                SizedBox(
-                  width: 28,
-                  height: 28,
-                  child: Checkbox(
-                    value: isChecked,
-                    onChanged: (v) => setState(() {
-                      if (v == true) _checkedEventIds.add(e.value.id);
-                      else _checkedEventIds.remove(e.value.id);
-                    }),
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    checkColor: const Color(0xFF1A535C),
-                    fillColor: WidgetStateProperty.resolveWith((states) {
-                      if (states.contains(WidgetState.selected)) return Colors.white;
-                      return Colors.white.withOpacity(0.9);
-                    }),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        );
-      }),
-      ActionChip(avatar: const Icon(Icons.add, size: 18), label: const Text('종목 추가'), onPressed: () => showAddEventDialog(context), backgroundColor: Colors.orange.shade50),
-    ]);
+            );
+          }),
+          ActionChip(avatar: const Icon(Icons.add, size: 18), label: const Text('종목 추가'), onPressed: () => showAddEventDialog(context), backgroundColor: Colors.orange.shade50),
+        ]);
+      },
+    );
   }
 
   void _secureSettingUpdate(VoidCallback updateAction, {bool isPlayerAction = false}) {
@@ -943,7 +919,8 @@ class _SetupTabletViewState extends State<SetupTabletView> with SetupLogicMixin<
     currentEvent!.groups ??= TournamentLogic.generateGroups(currentEvent!.players, currentEvent!.settings);
     saveData();
     // 체크된 종목은 예선/본선에서 제외
-    final visibleEvents = events.where((e) => !_checkedEventIds.contains(e.id)).toList();
+    final unchecked = eventUncheckedIdsNotifier.value;
+    final visibleEvents = events.where((e) => !unchecked.contains(e.id)).toList();
     final eventsToShow = visibleEvents.isEmpty ? List<TournamentEvent>.from(events) : visibleEvents;
     int initialIdx = 0;
     if (selectedEventIdx < events.length) {

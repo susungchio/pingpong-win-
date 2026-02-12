@@ -4,6 +4,7 @@ import 'models.dart';
 import 'tournament_logic.dart';
 import 'knockout_page.dart';
 import 'match_sheet_page.dart';
+import 'main.dart';
 
 class GroupStageMobileView extends StatefulWidget {
   final String tournamentBaseTitle;
@@ -159,7 +160,7 @@ class _GroupStageMobileViewState extends State<GroupStageMobileView> {
                           ),
                           _buildRankingTable(rankings, group, index),
                           const Divider(height: 1),
-                          ...group.matches.map((m) => _buildMatchTile(m, index)),
+                          ...group.matches.map((m) => _buildMatchTile(m, group)),
                         ],
                       ),
                     );
@@ -283,7 +284,7 @@ class _GroupStageMobileViewState extends State<GroupStageMobileView> {
     return lines.take(3).join('\n');
   }
 
-  Widget _buildMatchTile(Match m, int groupIdx) {
+  Widget _buildMatchTile(Match m, Group group) {
     if (!_isTeamMatch) {
       return ListTile(
         dense: true,
@@ -297,12 +298,12 @@ class _GroupStageMobileViewState extends State<GroupStageMobileView> {
           const SizedBox(width: 40),
           Expanded(child: Text(m.player2?.affiliation ?? '', textAlign: TextAlign.left, style: const TextStyle(fontSize: 10, color: Colors.grey))),
         ]),
-        onTap: () => _showScoreDialog(m),
+        onTap: () => _maybeShowScoreDialog(m, group),
       );
     }
 
     return InkWell(
-      onTap: () => _showScoreDialog(m),
+      onTap: () => _maybeShowScoreDialog(m, group),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
         child: Column(
@@ -333,24 +334,147 @@ class _GroupStageMobileViewState extends State<GroupStageMobileView> {
     );
   }
 
-  void _showScoreDialog(Match m) {
-    int s1 = m.score1; int s2 = m.score2;
-    showModalBottomSheet(context: context, builder: (context) => StatefulBuilder(builder: (context, setS) => Container(
-      padding: const EdgeInsets.all(24),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-          _counter((v) => setS(() => s1 = v), s1),
-          const Text(':', style: TextStyle(fontSize: 30)),
-          _counter((v) => setS(() => s2 = v), s2),
-        ]),
-        const SizedBox(height: 20),
-        ElevatedButton(onPressed: () {
-          setState(() { m.score1 = s1; m.score2 = s2; m.status = MatchStatus.completed; m.winner = s1 > s2 ? m.player1 : m.player2; _refreshRankings(); });
-          Navigator.pop(context); widget.onDataChanged();
-        }, child: const Text('점수 저장')),
-      ]),
-    )));
+  /// 본선 진행 중이면 관리자 비밀번호 확인 후 점수 입력창 표시
+  void _maybeShowScoreDialog(Match m, Group group) {
+    final knockoutStarted = _currentEvent.knockoutRounds != null && _currentEvent.knockoutRounds!.isNotEmpty;
+    final savedPassword = systemAdminPasswordNotifier.value;
+    if (!knockoutStarted || savedPassword == null || savedPassword.isEmpty) {
+      _showScoreDialog(m, group);
+      return;
+    }
+    final controller = TextEditingController();
+    showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('관리자 비밀번호'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('본선 토너먼트가 진행 중입니다. 예선 경기 결과를 변경하려면 관리자 비밀번호를 입력하세요.', style: TextStyle(fontSize: 13)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              obscureText: true,
+              decoration: const InputDecoration(
+                hintText: '비밀번호',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+              onSubmitted: (_) => Navigator.pop(ctx, controller.text),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text('확인'),
+          ),
+        ],
+      ),
+    ).then((result) {
+      controller.dispose();
+      if (result == null || !mounted) return;
+      if (result == savedPassword) {
+        _showScoreDialog(m, group);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('비밀번호가 일치하지 않습니다.')),
+        );
+      }
+    });
   }
 
-  Widget _counter(Function(int) onU, int v) => Column(children: [IconButton(onPressed: () => onU(v + 1), icon: const Icon(Icons.add_circle_outline)), Text('$v', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)), IconButton(onPressed: () => onU(v > 0 ? v - 1 : 0), icon: const Icon(Icons.remove_circle_outline))]);
+  /// 본선 토너먼트 점수입력창과 동일한 디자인. 기권 저장 시 같은 조 내 해당 선수의 나머지 경기도 모두 기권 처리
+  void _showScoreDialog(Match m, Group group) {
+    int s1 = m.score1 == -1 ? 0 : m.score1;
+    int s2 = m.score2 == -1 ? 0 : m.score2;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setS) => Container(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                Expanded(child: _scoreDialogPlayerInfo(m.player1, textAlign: TextAlign.right)),
+                const Padding(padding: EdgeInsets.symmetric(horizontal: 20), child: Text('VS', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.grey))),
+                Expanded(child: _scoreDialogPlayerInfo(m.player2, textAlign: TextAlign.left)),
+              ]),
+              const SizedBox(height: 40),
+              Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+                _scoreDialogCounter((v) => setS(() => s1 = v), s1),
+                const Text(':', style: TextStyle(fontSize: 50, fontWeight: FontWeight.bold)),
+                _scoreDialogCounter((v) => setS(() => s2 = v), s2),
+              ]),
+              const SizedBox(height: 30),
+              Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                ElevatedButton.icon(onPressed: () => setS(() { s1 = -1; s2 = 0; }), icon: const Icon(Icons.flag), label: const Text('P1 기권'), style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade50, foregroundColor: Colors.red)),
+                ElevatedButton.icon(onPressed: () => setS(() { s1 = 0; s2 = -1; }), icon: const Icon(Icons.flag), label: const Text('P2 기권'), style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade50, foregroundColor: Colors.red)),
+              ]),
+              const SizedBox(height: 40),
+              ElevatedButton(
+                onPressed: () {
+                  setState(() {
+                    m.score1 = s1;
+                    m.score2 = s2;
+                    if (s1 == -1 || s2 == -1) {
+                      m.status = MatchStatus.withdrawal;
+                      m.winner = s1 == -1 ? m.player2 : m.player1;
+                      // 같은 조 내 기권한 선수의 나머지 경기도 기권 처리
+                      final withdrawingPlayer = s1 == -1 ? m.player1 : m.player2;
+                      if (withdrawingPlayer != null) {
+                        for (final other in group.matches) {
+                          if (identical(other, m)) continue;
+                          if (other.player1 == withdrawingPlayer) {
+                            other.score1 = -1;
+                            other.score2 = 0;
+                            other.status = MatchStatus.withdrawal;
+                            other.winner = other.player2;
+                          } else if (other.player2 == withdrawingPlayer) {
+                            other.score1 = 0;
+                            other.score2 = -1;
+                            other.status = MatchStatus.withdrawal;
+                            other.winner = other.player1;
+                          }
+                        }
+                      }
+                    } else {
+                      m.status = MatchStatus.completed;
+                      m.winner = s1 > s2 ? m.player1 : m.player2;
+                    }
+                    _refreshRankings();
+                  });
+                  Navigator.pop(context);
+                  widget.onDataChanged();
+                },
+                style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 64), backgroundColor: const Color(0xFF1A535C), foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                child: const Text('점수 저장 및 확정', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _scoreDialogPlayerInfo(Player? p, {required TextAlign textAlign}) => Column(
+    crossAxisAlignment: textAlign == TextAlign.right ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+    children: [
+      Text(_isTeamMatch ? (p?.affiliation ?? 'TBD') : (p?.name ?? 'TBD'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+      Text(_isTeamMatch ? (p?.name ?? '') : (p?.affiliation ?? ''), style: const TextStyle(fontSize: 15, color: Colors.orange, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis),
+    ],
+  );
+
+  Widget _scoreDialogCounter(void Function(int) onU, int v) => Column(
+    children: [
+      IconButton(onPressed: () => onU(v + 1), icon: const Icon(Icons.add_circle, color: Color(0xFF4ECDC4), size: 56)),
+      Text(v == -1 ? '기권' : '$v', style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: Color(0xFF1A535C))),
+      IconButton(onPressed: () => onU(v > 0 ? v - 1 : 0), icon: const Icon(Icons.remove_circle, color: Colors.redAccent, size: 56)),
+    ],
+  );
 }

@@ -223,7 +223,6 @@ mixin SetupLogicMixin<T extends StatefulWidget> on State<T> {
         'title': titleController.text,
         'events': events.map((e) => _eventToMap(e)).toList(),
         'lastUpdated': DateTime.now().toIso8601String(),
-        'checkedEventIds': checkedEventIdsForSave,
       };
       final jsonString = jsonEncode(data);
       final directory = await getApplicationDocumentsDirectory();
