@@ -4,15 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'main.dart';
 import 'models.dart';
+import 'file_utils.dart';
 
-/// 프로그램 설정 전용 페이지.
 class ProgramSettingsPage extends StatefulWidget {
   final List<TournamentEvent> events;
   final String? currentFileName;
   final Function(File) onLoadFromFile;
   final Function(File, String) onDeleteFile;
   final Function(File, String) onEditTitle;
-  final Function(String)? onDeleteEvent; // 경기종목 삭제 콜백
+  final Function(String)? onDeleteEvent;
 
   const ProgramSettingsPage({
     super.key, 
@@ -72,7 +72,8 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
 
   Future<void> _refreshSavedList() async {
     try {
-      final directory = await getApplicationDocumentsDirectory();
+      final dataPath = await FileUtils.getDataDirPath();
+      final directory = Directory(dataPath);
       if (!await directory.exists()) return;
       final entities = await directory.list().toList();
       final files = entities.where((f) => f.path.contains('tournament_') && f.path.endsWith('.json')).toList();
@@ -89,7 +90,6 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
           });
         } catch (_) {}
       }
-      // 최신순 정렬
       tempInfos.sort((a, b) => (b['updated'] as String).compareTo(a['updated'] as String));
       setState(() { _savedTournaments = tempInfos; });
     } catch (e) { debugPrint('Refresh list error: $e'); }
@@ -119,14 +119,7 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
   Widget _sidebarItem(IconData icon, String label, bool isSelected, VoidCallback onTap) {
     return ListTile(
       leading: Icon(icon, color: isSelected ? Colors.amber : Colors.white, size: 20),
-      title: Text(
-        label,
-        style: TextStyle(
-          color: isSelected ? Colors.amber : Colors.white,
-          fontSize: 14,
-          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-        ),
-      ),
+      title: Text(label, style: TextStyle(color: isSelected ? Colors.amber : Colors.white, fontSize: 14, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
       onTap: onTap,
       contentPadding: const EdgeInsets.symmetric(horizontal: 24),
     );
@@ -149,22 +142,13 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
           _sidebarItem(Icons.settings_applications_rounded, '프로그램 설정', true, () {}),
           const Spacer(),
           const Divider(color: Colors.white24, height: 1),
-          const Padding(
-            padding: EdgeInsets.all(16.0),
-            child: Text('프로그램 설정', style: TextStyle(color: Colors.white24, fontSize: 10)),
-          ),
+          const Padding(padding: EdgeInsets.all(16.0), child: Text('프로그램 설정', style: TextStyle(color: Colors.white24, fontSize: 10))),
         ],
       ),
     );
   }
 
-  Widget _buildFontSettingRow(
-    String label,
-    String? currentVal,
-    void Function(String?) onChanged,
-    TextEditingController controller,
-    Map<String, String?> options,
-  ) {
+  Widget _buildFontSettingRow(String label, String? currentVal, void Function(String?) onChanged, TextEditingController controller, Map<String, String?> options) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8.0),
       child: Column(
@@ -181,13 +165,8 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
                   child: DropdownButtonFormField<String?>(
                     value: options.values.contains(currentVal) ? currentVal : null,
                     isDense: true,
-                    decoration: const InputDecoration(
-                      border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-                    ),
-                    items: options.entries
-                        .map((e) => DropdownMenuItem(value: e.value, child: Text(e.key, style: TextStyle(fontSize: 12, fontFamily: e.value))))
-                        .toList(),
+                    decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 0)),
+                    items: options.entries.map((e) => DropdownMenuItem(value: e.value, child: Text(e.key, style: TextStyle(fontSize: 12, fontFamily: e.value)))).toList(),
                     onChanged: onChanged,
                   ),
                 ),
@@ -199,12 +178,7 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
                   height: 32,
                   child: TextField(
                     controller: controller,
-                    decoration: const InputDecoration(
-                      hintText: '직접 입력',
-                      border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-                      isDense: true,
-                    ),
+                    decoration: const InputDecoration(hintText: '직접 입력', border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 0), isDense: true),
                     style: const TextStyle(fontSize: 12),
                     onChanged: (v) => onChanged(v.isEmpty ? null : v),
                   ),
@@ -231,29 +205,11 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
   }
 
   Widget _buildEventCheckGrid() {
-    if (widget.events.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.only(top: 4),
-        child: Text('대회 설정에서 추가한 종목이 없습니다.', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-      );
-    }
-    final list = widget.events;
-    final rows = <Widget>[];
+    if (widget.events.isEmpty) return Padding(padding: const EdgeInsets.only(top: 4), child: Text('대회 설정에서 추가한 종목이 없습니다.', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)));
+    final list = widget.events; final rows = <Widget>[];
     for (int i = 0; i < list.length; i += 2) {
-      final left = list[i];
-      final right = i + 1 < list.length ? list[i + 1] : null;
-      rows.add(
-        Padding(
-          padding: const EdgeInsets.only(bottom: 6),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(child: _eventCheckTile(left)),
-              if (right != null) ...[const SizedBox(width: 8), Expanded(child: _eventCheckTile(right))],
-            ],
-          ),
-        ),
-      );
+      final left = list[i]; final right = i + 1 < list.length ? list[i + 1] : null;
+      rows.add(Padding(padding: const EdgeInsets.only(bottom: 6), child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [Expanded(child: _eventCheckTile(left)), if (right != null) ...[const SizedBox(width: 8), Expanded(child: _eventCheckTile(right))]])));
     }
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: rows);
   }
@@ -269,28 +225,10 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
           padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
           child: Row(
             children: [
-              SizedBox(
-                width: 22,
-                height: 22,
-                child: Checkbox(
-                  value: checked,
-                  onChanged: (v) => _applyEventCheck(event.id, v ?? false),
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  activeColor: const Color(0xFF1A535C),
-                ),
-              ),
+              SizedBox(width: 22, height: 22, child: Checkbox(value: checked, onChanged: (v) => _applyEventCheck(event.id, v ?? false), materialTapTargetSize: MaterialTapTargetSize.shrinkWrap, activeColor: const Color(0xFF1A535C))),
               const SizedBox(width: 6),
-              Expanded(
-                child: Text(event.name, style: const TextStyle(fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
-              ),
-              // 삭제 버튼 추가
-              IconButton(
-                icon: const Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
-                onPressed: () => _handleDeleteEvent(event),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-                tooltip: '종목 삭제',
-              ),
+              Expanded(child: Text(event.name, style: const TextStyle(fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis)),
+              IconButton(icon: const Icon(Icons.delete_outline, size: 18, color: Colors.redAccent), onPressed: () => _handleDeleteEvent(event), padding: EdgeInsets.zero, constraints: const BoxConstraints(), tooltip: '종목 삭제'),
             ],
           ),
         ),
@@ -298,17 +236,9 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
     );
   }
 
-  // 경기종목 삭제 처리 (시스템 비밀번호 확인)
-  void _handleDeleteEvent(TournamentEvent event) {
-    final savedPassword = systemAdminPasswordNotifier.value;
-    
-    // 시스템 비밀번호가 설정되어 있지 않으면 바로 삭제
-    if (savedPassword == null || savedPassword.isEmpty) {
-      _confirmDeleteEvent(event);
-      return;
-    }
-    
-    // 시스템 비밀번호 확인 다이얼로그
+  void _handleDeleteEvent(TournamentEvent event) async {
+    final savedPassword = await FileUtils.getAdminPassword();
+    if (!mounted) return;
     final pwController = TextEditingController();
     showDialog(
       context: context,
@@ -319,51 +249,17 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
           children: [
             const Text('경기종목을 삭제하려면 시스템 비밀번호를 입력하세요.', style: TextStyle(fontSize: 13)),
             const SizedBox(height: 16),
-            TextField(
-              controller: pwController,
-              obscureText: true,
-              autofocus: true,
-              decoration: const InputDecoration(
-                labelText: '시스템 비밀번호',
-                border: OutlineInputBorder(),
-              ),
-              onSubmitted: (_) {
-                if (pwController.text == savedPassword) {
-                  Navigator.pop(ctx);
-                  _confirmDeleteEvent(event);
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('비밀번호가 틀렸습니다.'), backgroundColor: Colors.redAccent)
-                  );
-                }
-              },
-            ),
+            TextField(controller: pwController, obscureText: true, autofocus: true, decoration: const InputDecoration(labelText: '시스템 비밀번호', border: OutlineInputBorder()), onSubmitted: (_) { if (pwController.text == savedPassword) { Navigator.pop(ctx); _confirmDeleteEvent(event); } else { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('비밀번호가 틀렸습니다.'), backgroundColor: Colors.redAccent)); } }),
           ],
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('취소'),
-          ),
-          TextButton(
-            onPressed: () {
-              if (pwController.text == savedPassword) {
-                Navigator.pop(ctx);
-                _confirmDeleteEvent(event);
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('비밀번호가 틀렸습니다.'), backgroundColor: Colors.redAccent)
-                );
-              }
-            },
-            child: const Text('확인'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
+          TextButton(onPressed: () { if (pwController.text == savedPassword) { Navigator.pop(ctx); _confirmDeleteEvent(event); } else { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('비밀번호가 틀렸습니다.'), backgroundColor: Colors.redAccent)); } }, child: const Text('확인')),
         ],
       ),
     );
   }
 
-  // 종목 삭제 확인 및 실행
   void _confirmDeleteEvent(TournamentEvent event) {
     showDialog(
       context: context,
@@ -371,28 +267,19 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
         title: const Text('경기종목 삭제'),
         content: Text('[${event.name}] 종목을 삭제하시겠습니까?\n\n※ 등록된 선수 명단이 함께 삭제됩니다.', style: const TextStyle(fontSize: 13)),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('취소'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              if (widget.onDeleteEvent != null) {
-                widget.onDeleteEvent!(event.id);
-                // 체크 상태에서도 제거
-                _eventCheckState.remove(event.id);
-                final next = Set<String>.from(eventUncheckedIdsNotifier.value);
-                next.remove(event.id);
-                eventUncheckedIdsNotifier.value = next;
-                saveEventDisplayChecked(next);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('[${event.name}] 종목이 삭제되었습니다.'), duration: const Duration(seconds: 1))
-                );
-              }
-            },
-            child: const Text('삭제', style: TextStyle(color: Colors.red)),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
+          TextButton(onPressed: () {
+            Navigator.pop(ctx);
+            if (widget.onDeleteEvent != null) {
+              widget.onDeleteEvent!(event.id);
+              _eventCheckState.remove(event.id);
+              final next = Set<String>.from(eventUncheckedIdsNotifier.value);
+              next.remove(event.id);
+              eventUncheckedIdsNotifier.value = next;
+              saveEventDisplayChecked(next);
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('[${event.name}] 종목이 삭제되었습니다.'), duration: const Duration(seconds: 1)));
+            }
+          }, child: const Text('삭제', style: TextStyle(color: Colors.red))),
         ],
       ),
     );
@@ -406,77 +293,26 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
         const SizedBox(height: 12),
         Container(
           height: 250,
-          decoration: BoxDecoration(
-            color: const Color(0xFFF8FAFC),
-            border: Border.all(color: Colors.grey.shade200),
-            borderRadius: BorderRadius.circular(12),
-          ),
+          decoration: BoxDecoration(color: const Color(0xFFF8FAFC), border: Border.all(color: Colors.grey.shade200), borderRadius: BorderRadius.circular(12)),
           child: _savedTournaments.isEmpty 
               ? const Center(child: Text('저장된 대회가 없음', style: TextStyle(color: Colors.grey, fontSize: 12))) 
               : ListView.builder(
                   padding: const EdgeInsets.all(8),
                   itemCount: _savedTournaments.length,
                   itemBuilder: (context, index) {
-                    final info = _savedTournaments[index];
-                    final bool isCurrent = _currentFile == info['fileName'];
+                    final info = _savedTournaments[index]; final bool isCurrent = _currentFile == info['fileName'];
                     return Card(
-                      elevation: isCurrent ? 2 : 0,
-                      margin: const EdgeInsets.only(bottom: 8),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        side: BorderSide(
-                          color: isCurrent ? const Color(0xFF1A535C) : Colors.transparent,
-                          width: 2,
-                        ),
-                      ),
+                      elevation: isCurrent ? 2 : 0, margin: const EdgeInsets.only(bottom: 8), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: BorderSide(color: isCurrent ? const Color(0xFF1A535C) : Colors.transparent, width: 2)),
                       color: isCurrent ? Colors.white : Colors.white.withOpacity(0.7),
                       child: ListTile(
-                        dense: true,
-                        leading: Icon(
-                          isCurrent ? Icons.check_circle : Icons.description_outlined, 
-                          color: isCurrent ? const Color(0xFF1A535C) : Colors.grey,
-                          size: 20,
-                        ),
-                        title: Text(
-                          info['title'], 
-                          style: TextStyle(
-                            fontSize: 14, 
-                            fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
-                            color: isCurrent ? const Color(0xFF1A535C) : Colors.black87,
-                          ), 
-                          maxLines: 1, 
-                          overflow: TextOverflow.ellipsis
-                        ),
-                        subtitle: Text(
-                          '최근 수정: ${info['updated'].toString().split('T')[0]}', 
-                          style: const TextStyle(fontSize: 11, color: Colors.grey)
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: const Icon(Icons.edit_note, size: 20, color: Colors.blueGrey),
-                              onPressed: () => widget.onEditTitle(info['file'], info['title']).then((_) => _refreshSavedList()),
-                              tooltip: '제목 수정',
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.delete_outline, size: 20, color: Colors.redAccent),
-                              onPressed: () => widget.onDeleteFile(info['file'], info['fileName']).then((_) => _refreshSavedList()),
-                              tooltip: '삭제',
-                            ),
-                          ],
-                        ),
-                        onTap: () async {
-                          await widget.onLoadFromFile(info['file']);
-                          setState(() {
-                            _currentFile = info['fileName'];
-                          });
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('[${info['title']}] 대회를 불러왔습니다.'), duration: const Duration(seconds: 1))
-                            );
-                          }
-                        },
+                        dense: true, leading: Icon(isCurrent ? Icons.check_circle : Icons.description_outlined, color: isCurrent ? const Color(0xFF1A535C) : Colors.grey, size: 20),
+                        title: Text(info['title'], style: TextStyle(fontSize: 14, fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal, color: isCurrent ? const Color(0xFF1A535C) : Colors.black87), maxLines: 1, overflow: TextOverflow.ellipsis),
+                        subtitle: Text('최근 수정: ${info['updated'].toString().split('T')[0]}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                        trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                          IconButton(icon: const Icon(Icons.edit_note, size: 20, color: Colors.blueGrey), onPressed: () => widget.onEditTitle(info['file'], info['title']).then((_) => _refreshSavedList()), tooltip: '제목 수정'),
+                          IconButton(icon: const Icon(Icons.delete_outline, size: 20, color: Colors.redAccent), onPressed: () => widget.onDeleteFile(info['file'], info['fileName']).then((_) => _refreshSavedList()), tooltip: '삭제'),
+                        ]),
+                        onTap: () async { await widget.onLoadFromFile(info['file']); setState(() { _currentFile = info['fileName']; }); if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('[${info['title']}] 대회를 불러왔습니다.'), duration: const Duration(seconds: 1))); },
                       ),
                     );
                   },
@@ -499,38 +335,16 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Row(
-                  children: [
-                    Icon(Icons.settings, color: Color(0xFF1A535C), size: 26),
-                    SizedBox(width: 10),
-                    Text('프로그램 설정', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                  ],
-                ),
+                const Row(children: [Icon(Icons.settings, color: Color(0xFF1A535C), size: 26), SizedBox(width: 10), Text('프로그램 설정', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold))]),
                 ElevatedButton.icon(
                   onPressed: () async {
-                    final newSettings = FontSettings(
-                      titleFont: _tmpTitleFont,
-                      headerFont: _tmpHeaderFont,
-                      bodyFont: _tmpBodyFont,
-                    );
+                    final newSettings = FontSettings(titleFont: _tmpTitleFont, headerFont: _tmpHeaderFont, bodyFont: _tmpBodyFont);
                     appFontNotifier.value = newSettings;
                     await saveFontSettings(newSettings);
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('영역별 폰트 설정이 저장 및 적용되었습니다.'),
-                          duration: Duration(seconds: 1),
-                        ),
-                      );
-                    }
+                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('영역별 폰트 설정이 저장 및 적용되었습니다.'), duration: Duration(seconds: 1)));
                   },
-                  icon: const Icon(Icons.done_all, size: 18),
-                  label: const Text('모든 설정 저장 및 적용', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF1A535C),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  ),
+                  icon: const Icon(Icons.done_all, size: 18), label: const Text('모든 설정 저장 및 적용', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1A535C), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12)),
                 ),
               ],
             ),
@@ -552,100 +366,31 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
                         const SizedBox(height: 12),
                         const Text('영역별 폰트 설정', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey, fontSize: 14)),
                         const SizedBox(height: 10),
-                        _buildFontSettingRow(
-                          '대제목 (메인 이름)',
-                          _tmpTitleFont,
-                          (v) => setState(() {
-                            _tmpTitleFont = v;
-                            _titleFontController.text = v ?? '';
-                          }),
-                          _titleFontController,
-                          _fontOptions,
-                        ),
-                        _buildFontSettingRow(
-                          '타이틀 (소제목/항목)',
-                          _tmpHeaderFont,
-                          (v) => setState(() {
-                            _tmpHeaderFont = v;
-                            _headerFontController.text = v ?? '';
-                          }),
-                          _headerFontController,
-                          _fontOptions,
-                        ),
-                        _buildFontSettingRow(
-                          '내용 (선수 이름/일반)',
-                          _tmpBodyFont,
-                          (v) => setState(() {
-                            _tmpBodyFont = v;
-                            _bodyFontController.text = v ?? '';
-                          }),
-                          _bodyFontController,
-                          _fontOptions,
-                        ),
-                        const SizedBox(height: 12),
-                        const Divider(height: 1),
-                        const SizedBox(height: 10),
+                        _buildFontSettingRow('대제목 (메인 이름)', _tmpTitleFont, (v) => setState(() { _tmpTitleFont = v; _titleFontController.text = v ?? ''; }), _titleFontController, _fontOptions),
+                        _buildFontSettingRow('타이틀 (소제목/항목)', _tmpHeaderFont, (v) => setState(() { _tmpHeaderFont = v; _headerFontController.text = v ?? ''; }), _headerFontController, _fontOptions),
+                        _buildFontSettingRow('내용 (선수 이름/일반)', _tmpBodyFont, (v) => setState(() { _tmpBodyFont = v; _bodyFontController.text = v ?? ''; }), _bodyFontController, _fontOptions),
+                        const SizedBox(height: 12), const Divider(height: 1), const SizedBox(height: 10),
                         const Text('경기 종목', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey, fontSize: 14)),
-                        const SizedBox(height: 6),
-                        Text('오늘 진행할 경기가 아닌 종목은 체크박스의 체크를 해제하시오.', style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
-                        const SizedBox(height: 8),
-                        _buildEventCheckGrid(),
-                        const SizedBox(height: 16),
-                        const Divider(height: 1),
-                        const SizedBox(height: 14),
+                        const SizedBox(height: 6), Text('오늘 진행할 경기가 아닌 종목은 체크박스의 체크를 해제하시오.', style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
+                        const SizedBox(height: 8), _buildEventCheckGrid(),
+                        const SizedBox(height: 16), const Divider(height: 1), const SizedBox(height: 14),
                         const Text('시스템관리 비밀번호', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey, fontSize: 14)),
                         const SizedBox(height: 6),
                         Row(
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
-                            Expanded(
-                              child: TextField(
-                                controller: _systemPasswordController,
-                                obscureText: true,
-                                decoration: const InputDecoration(
-                                  hintText: '비밀번호 입력',
-                                  border: OutlineInputBorder(),
-                                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                  isDense: true,
-                                ),
-                                style: const TextStyle(fontSize: 13),
-                              ),
-                            ),
+                            Expanded(child: TextField(controller: _systemPasswordController, obscureText: true, decoration: const InputDecoration(hintText: '비밀번호 입력', border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10), isDense: true), style: const TextStyle(fontSize: 13))),
                             const SizedBox(width: 10),
-                            ElevatedButton(
-                              onPressed: () async {
-                                final pwd = _systemPasswordController.text;
-                                await saveSystemAdminPassword(pwd);
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(pwd.isEmpty ? '비밀번호가 해제되었습니다.' : '시스템관리 비밀번호가 저장되었습니다.'),
-                                      duration: const Duration(seconds: 1),
-                                    ),
-                                  );
-                                }
-                              },
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF1A535C),
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                              ),
-                              child: const Text('저장', style: TextStyle(fontWeight: FontWeight.bold)),
-                            ),
+                            ElevatedButton(onPressed: () async { final pwd = _systemPasswordController.text; await saveSystemAdminPassword(pwd); if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(pwd.isEmpty ? '비밀번호가 해제되었습니다.' : '시스템관리 비밀번호가 저장되었습니다.'), duration: const Duration(seconds: 1))); }, style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1A535C), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12)), child: const Text('저장', style: TextStyle(fontWeight: FontWeight.bold))),
                           ],
                         ),
-                        const SizedBox(height: 16),
-                        _buildSettingInfoRow('프로그램 버전', 'v1.5.0'),
-                        const SizedBox(height: 4),
-                        const Center(child: Text('© 2024 탁구 대회 매니저', style: TextStyle(fontSize: 10, color: Colors.grey))),
+                        const SizedBox(height: 16), _buildSettingInfoRow('프로그램 버전', 'v1.5.0'),
+                        const SizedBox(height: 4), const Center(child: Text('© 2024 탁구 대회 매니저', style: TextStyle(fontSize: 10, color: Colors.grey))),
                       ],
                     ),
                   ),
                 ),
-                const VerticalDivider(width: 1),
-                Expanded(flex: 1, child: Container(color: Colors.white)),
-                const VerticalDivider(width: 1),
-                Expanded(flex: 1, child: Container(color: Colors.white)),
+                const VerticalDivider(width: 1), Expanded(flex: 1, child: Container(color: Colors.white)), const VerticalDivider(width: 1), Expanded(flex: 1, child: Container(color: Colors.white)),
               ],
             ),
           ),
@@ -658,12 +403,7 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF4F7F9),
-      body: Row(
-        children: [
-          _buildSidebar(),
-          Expanded(child: _buildSettingsContent()),
-        ],
-      ),
+      body: Row(children: [_buildSidebar(), Expanded(child: _buildSettingsContent())]),
     );
   }
 }

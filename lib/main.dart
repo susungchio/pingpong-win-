@@ -1,161 +1,65 @@
-import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:window_manager/window_manager.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:window_manager/window_manager.dart';
 import 'setup_page.dart';
-
-// 영역별 폰트 설정을 위한 클래스
-class FontSettings {
-  final String? titleFont;
-  final String? headerFont;
-  final String? bodyFont;
-
-  FontSettings({this.titleFont, this.headerFont, this.bodyFont});
-
-  Map<String, dynamic> toJson() => {
-    'titleFont': titleFont,
-    'headerFont': headerFont,
-    'bodyFont': bodyFont,
-  };
-
-  factory FontSettings.fromJson(Map<String, dynamic> json) => FontSettings(
-    titleFont: json['titleFont'],
-    headerFont: json['headerFont'],
-    bodyFont: json['bodyFont'],
-  );
-}
-
-final ValueNotifier<FontSettings> appFontNotifier = ValueNotifier<FontSettings>(
-  FontSettings(titleFont: null, headerFont: null, bodyFont: null),
-);
-
-Future<File> _getFontConfigFile() async {
-  final directory = await getApplicationDocumentsDirectory();
-  return File('${directory.path}/font_config.json');
-}
-
-Future<void> saveFontSettings(FontSettings settings) async {
-  try {
-    final file = await _getFontConfigFile();
-    await file.writeAsString(jsonEncode(settings.toJson()));
-  } catch (e) {
-    debugPrint('폰트 저장 오류: $e');
-  }
-}
-
-Future<void> loadFontSettings() async {
-  try {
-    final file = await _getFontConfigFile();
-    if (await file.exists()) {
-      final content = await file.readAsString();
-      final Map<String, dynamic> json = jsonDecode(content);
-      appFontNotifier.value = FontSettings.fromJson(json);
-    }
-  } catch (e) {
-    debugPrint('폰트 로드 오류: $e');
-  }
-}
-
-/// 프로그램설정에서 체크 해제한 경기종목 id 집합. 이 id는 예선/본선에서 제외되고 메인에서 빨간색 표시.
-final ValueNotifier<Set<String>> eventUncheckedIdsNotifier = ValueNotifier<Set<String>>({});
-
-Future<File> _getEventDisplayConfigFile() async {
-  final directory = await getApplicationDocumentsDirectory();
-  return File('${directory.path}/event_display_checked.json');
-}
-
-Future<void> saveEventDisplayChecked(Set<String> uncheckedIds) async {
-  try {
-    final file = await _getEventDisplayConfigFile();
-    await file.writeAsString(jsonEncode(uncheckedIds.toList()));
-  } catch (e) {
-    debugPrint('경기종목 표시 저장 오류: $e');
-  }
-}
-
-Future<void> loadEventDisplayChecked() async {
-  try {
-    final file = await _getEventDisplayConfigFile();
-    if (await file.exists()) {
-      final content = await file.readAsString();
-      final List<dynamic> list = jsonDecode(content);
-      eventUncheckedIdsNotifier.value = Set<String>.from(list.map((e) => e.toString()));
-    }
-  } catch (e) {
-    debugPrint('경기종목 표시 로드 오류: $e');
-  }
-}
-
-/// 시스템관리 비밀번호 (프로그램설정에서 설정, 저장 후 다른 화면에서 인증용으로 사용)
-final ValueNotifier<String?> systemAdminPasswordNotifier = ValueNotifier<String?>(null);
-
-Future<File> _getSystemAdminPasswordFile() async {
-  final directory = await getApplicationDocumentsDirectory();
-  return File('${directory.path}/system_admin_password.json');
-}
-
-Future<void> saveSystemAdminPassword(String password) async {
-  try {
-    final file = await _getSystemAdminPasswordFile();
-    await file.writeAsString(jsonEncode({'password': password}));
-    systemAdminPasswordNotifier.value = password.isEmpty ? null : password;
-  } catch (e) {
-    debugPrint('시스템관리 비밀번호 저장 오류: $e');
-  }
-}
-
-Future<void> loadSystemAdminPassword() async {
-  try {
-    final file = await _getSystemAdminPasswordFile();
-    if (await file.exists()) {
-      final content = await file.readAsString();
-      final Map<String, dynamic> json = jsonDecode(content);
-      final pwd = json['password']?.toString();
-      systemAdminPasswordNotifier.value = (pwd == null || pwd.isEmpty) ? null : pwd;
-    }
-  } catch (e) {
-    debugPrint('시스템관리 비밀번호 로드 오류: $e');
-  }
-}
+import 'file_utils.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // [수정] 윈도우/데스크톱용 SQLite FFI 초기화
+  // 1. 외부 폰트 로드
+  await _loadExternalFonts();
+  
+  // 2. 저장된 설정 로드 (폰트 설정, 경기종목 표시 설정 등)
+  await FileUtils.loadFontSettings();
+  await FileUtils.loadEventDisplaySettings();
+  await FileUtils.getAdminPassword(); // 비밀번호 로드 및 노티파이어 초기화
+
   if (Platform.isWindows || Platform.isLinux) {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
   }
 
-  await loadFontSettings();
-  await loadEventDisplayChecked();
-  await loadSystemAdminPassword();
-
-  if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
-    await windowManager.ensureInitialized();
-    WindowOptions windowOptions = const WindowOptions(
-      size: Size(1920, 1060),
-      minimumSize: Size(1280, 720),
-      center: true,
-      backgroundColor: Colors.transparent,
-      skipTaskbar: false,
-      title: '탁구 토너먼트 매니저',
-    );
-    await windowManager.waitUntilReadyToShow(windowOptions, () async {
-      await windowManager.show();
-      await windowManager.focus();
-    });
-  }
-
-  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.dark,
-  ));
+  await windowManager.ensureInitialized();
+  WindowOptions windowOptions = const WindowOptions(
+    size: Size(1280, 800),
+    center: true,
+    title: "탁구 대회 관리 시스템",
+  );
+  windowManager.waitUntilReadyToShow(windowOptions, () async {
+    await windowManager.show();
+    await windowManager.focus();
+  });
 
   runApp(const PingPongApp());
+}
+
+Future<void> _loadExternalFonts() async {
+  try {
+    final exePath = File(Platform.resolvedExecutable).parent.path;
+    final fontDir = Directory('$exePath/fonts');
+    
+    if (await fontDir.exists()) {
+      final fontFiles = fontDir.listSync().whereType<File>().where(
+        (file) => file.path.toLowerCase().endsWith('.ttf')
+      );
+
+      for (var fontFile in fontFiles) {
+        final familyName = fontFile.path.split(Platform.pathSeparator).last.split('.').first;
+        final data = await fontFile.readAsBytes();
+        
+        final fontLoader = FontLoader(familyName);
+        fontLoader.addFont(Future.value(ByteData.view(data.buffer)));
+        await fontLoader.load();
+        debugPrint('외부 폰트 로드 완료: $familyName');
+      }
+    }
+  } catch (e) {
+    debugPrint('폰트 로딩 오류: $e');
+  }
 }
 
 class PingPongApp extends StatelessWidget {
@@ -165,40 +69,23 @@ class PingPongApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return ValueListenableBuilder<FontSettings>(
       valueListenable: appFontNotifier,
-      builder: (context, fonts, child) {
+      builder: (context, fontSettings, _) {
         return MaterialApp(
-          title: '탁구 토너먼트 매니저',
+          title: '탁구 대회 관리',
           debugShowCheckedModeBanner: false,
           theme: ThemeData(
             useMaterial3: true,
-            textTheme: TextTheme(
-              displayLarge: TextStyle(fontFamily: fonts.titleFont),
-              displayMedium: TextStyle(fontFamily: fonts.titleFont),
-              displaySmall: TextStyle(fontFamily: fonts.titleFont),
-              headlineLarge: TextStyle(fontFamily: fonts.titleFont),
-              headlineMedium: TextStyle(fontFamily: fonts.headerFont),
-              headlineSmall: TextStyle(fontFamily: fonts.headerFont),
-              titleLarge: TextStyle(fontFamily: fonts.headerFont),
-              titleMedium: TextStyle(fontFamily: fonts.headerFont),
-              titleSmall: TextStyle(fontFamily: fonts.headerFont),
-              bodyLarge: TextStyle(fontFamily: fonts.bodyFont),
-              bodyMedium: TextStyle(fontFamily: fonts.bodyFont),
-              bodySmall: TextStyle(fontFamily: fonts.bodyFont),
-              labelLarge: TextStyle(fontFamily: fonts.bodyFont),
-              labelMedium: TextStyle(fontFamily: fonts.bodyFont),
-              labelSmall: TextStyle(fontFamily: fonts.bodyFont),
-            ),
             colorScheme: ColorScheme.fromSeed(
               seedColor: const Color(0xFF1A535C),
               primary: const Color(0xFF1A535C),
-              secondary: const Color(0xFF4ECDC4),
-              surface: const Color(0xFFF7FFF7),
+              secondary: const Color(0xFFFF6B6B),
             ),
-            cardTheme: const CardThemeData(elevation: 0, color: Colors.white),
+            // 설정된 바디 폰트가 있으면 적용, 없으면 기본 세종고딕
+            fontFamily: fontSettings.bodyFont ?? 'SJ세종고딕',
           ),
           home: const SetupPage(),
         );
-      },
+      }
     );
   }
 }
