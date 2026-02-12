@@ -1,13 +1,26 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'main.dart';
 import 'models.dart';
 
-/// 프로그램 설정 전용 페이지. 왼쪽에 메인과 동일한 스타일의 사이드바를 두고, 오른쪽에 설정 콘텐츠 표시.
+/// 프로그램 설정 전용 페이지.
 class ProgramSettingsPage extends StatefulWidget {
-  /// 대회 설정에서 추가한 경기종목 목록 (없으면 빈 목록)
   final List<TournamentEvent> events;
+  final String? currentFileName;
+  final Function(File) onLoadFromFile;
+  final Function(File, String) onDeleteFile;
+  final Function(File, String) onEditTitle;
 
-  const ProgramSettingsPage({super.key, this.events = const []});
+  const ProgramSettingsPage({
+    super.key, 
+    this.events = const [],
+    this.currentFileName,
+    required this.onLoadFromFile,
+    required this.onDeleteFile,
+    required this.onEditTitle,
+  });
 
   @override
   State<ProgramSettingsPage> createState() => _ProgramSettingsPageState();
@@ -23,8 +36,9 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
   String? _tmpHeaderFont;
   String? _tmpBodyFont;
 
-  /// 경기종목별 체크 상태 (종목 id → 체크 여부). 기본값 true.
   final Map<String, bool> _eventCheckState = {};
+  List<Map<String, dynamic>> _savedTournaments = [];
+  String? _currentFile;
 
   static const Map<String, String?> _fontOptions = {
     '시스템 기본': null,
@@ -40,6 +54,7 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
   @override
   void initState() {
     super.initState();
+    _currentFile = widget.currentFileName;
     _tmpTitleFont = appFontNotifier.value.titleFont;
     _tmpHeaderFont = appFontNotifier.value.headerFont;
     _tmpBodyFont = appFontNotifier.value.bodyFont;
@@ -50,6 +65,32 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
     for (var e in widget.events) {
       _eventCheckState[e.id] = !unchecked.contains(e.id);
     }
+    _refreshSavedList();
+  }
+
+  Future<void> _refreshSavedList() async {
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      if (!await directory.exists()) return;
+      final entities = await directory.list().toList();
+      final files = entities.where((f) => f.path.contains('tournament_') && f.path.endsWith('.json')).toList();
+      List<Map<String, dynamic>> tempInfos = [];
+      for (var f in files) {
+        try {
+          final content = await File(f.path).readAsString();
+          final data = jsonDecode(content);
+          tempInfos.add({
+            'file': File(f.path), 
+            'title': data['title'] ?? '제목 없음', 
+            'fileName': f.path.split(Platform.pathSeparator).last,
+            'updated': data['lastUpdated'] ?? '',
+          });
+        } catch (_) {}
+      }
+      // 최신순 정렬
+      tempInfos.sort((a, b) => (b['updated'] as String).compareTo(a['updated'] as String));
+      setState(() { _savedTournaments = tempInfos; });
+    } catch (e) { debugPrint('Refresh list error: $e'); }
   }
 
   void _applyEventCheck(String eventId, bool checked) {
@@ -101,7 +142,6 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
           const Text('탁구 대회 매니저', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
           const Text('PC/Tablet Edition', style: TextStyle(color: Colors.white54, fontSize: 11)),
           const Divider(color: Colors.white24, height: 40, indent: 30, endIndent: 30),
-          // 메인으로 돌아가기: 대회 설정
           _sidebarItem(Icons.edit_document, '대회 설정 및 참가 등록', false, () => Navigator.pop(context)),
           _sidebarItem(Icons.storage_rounded, '기초 선수 DB 관리', false, () => Navigator.pop(context)),
           _sidebarItem(Icons.settings_applications_rounded, '프로그램 설정', true, () {}),
@@ -124,42 +164,48 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
     Map<String, String?> options,
   ) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10.0),
+      padding: const EdgeInsets.only(bottom: 8.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 4),
+          Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 2),
           Row(
             children: [
               Expanded(
                 flex: 3,
-                child: DropdownButtonFormField<String?>(
-                  value: options.values.contains(currentVal) ? currentVal : null,
-                  isDense: true,
-                  decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: SizedBox(
+                  height: 32,
+                  child: DropdownButtonFormField<String?>(
+                    value: options.values.contains(currentVal) ? currentVal : null,
+                    isDense: true,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                    ),
+                    items: options.entries
+                        .map((e) => DropdownMenuItem(value: e.value, child: Text(e.key, style: TextStyle(fontSize: 12, fontFamily: e.value))))
+                        .toList(),
+                    onChanged: onChanged,
                   ),
-                  items: options.entries
-                      .map((e) => DropdownMenuItem(value: e.value, child: Text(e.key, style: TextStyle(fontSize: 13, fontFamily: e.value))))
-                      .toList(),
-                  onChanged: onChanged,
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 6),
               Expanded(
                 flex: 2,
-                child: TextField(
-                  controller: controller,
-                  decoration: const InputDecoration(
-                    hintText: '직접 입력',
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    isDense: true,
+                child: SizedBox(
+                  height: 32,
+                  child: TextField(
+                    controller: controller,
+                    decoration: const InputDecoration(
+                      hintText: '직접 입력',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                      isDense: true,
+                    ),
+                    style: const TextStyle(fontSize: 12),
+                    onChanged: (v) => onChanged(v.isEmpty ? null : v),
                   ),
-                  style: const TextStyle(fontSize: 13),
-                  onChanged: (v) => onChanged(v.isEmpty ? null : v),
                 ),
               ),
             ],
@@ -182,7 +228,6 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
     );
   }
 
-  /// 한 줄에 2개씩 경기종목 + 체크박스 배치
   Widget _buildEventCheckGrid() {
     if (widget.events.isEmpty) {
       return Padding(
@@ -243,7 +288,96 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
     );
   }
 
-  /// 설정 콘텐츠: 세로로 3등분하여 왼쪽 1/3에 영역별 폰트 설정(여백 적게), 나머지 영역은 여유 공간
+  Widget _buildSavedTournamentsList() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('저장된 대회 목록', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey, fontSize: 14)),
+        const SizedBox(height: 12),
+        Container(
+          height: 250,
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8FAFC),
+            border: Border.all(color: Colors.grey.shade200),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: _savedTournaments.isEmpty 
+              ? const Center(child: Text('저장된 대회가 없음', style: TextStyle(color: Colors.grey, fontSize: 12))) 
+              : ListView.builder(
+                  padding: const EdgeInsets.all(8),
+                  itemCount: _savedTournaments.length,
+                  itemBuilder: (context, index) {
+                    final info = _savedTournaments[index];
+                    final bool isCurrent = _currentFile == info['fileName'];
+                    return Card(
+                      elevation: isCurrent ? 2 : 0,
+                      margin: const EdgeInsets.only(bottom: 8),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        side: BorderSide(
+                          color: isCurrent ? const Color(0xFF1A535C) : Colors.transparent,
+                          width: 2,
+                        ),
+                      ),
+                      color: isCurrent ? Colors.white : Colors.white.withOpacity(0.7),
+                      child: ListTile(
+                        dense: true,
+                        leading: Icon(
+                          isCurrent ? Icons.check_circle : Icons.description_outlined, 
+                          color: isCurrent ? const Color(0xFF1A535C) : Colors.grey,
+                          size: 20,
+                        ),
+                        title: Text(
+                          info['title'], 
+                          style: TextStyle(
+                            fontSize: 14, 
+                            fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
+                            color: isCurrent ? const Color(0xFF1A535C) : Colors.black87,
+                          ), 
+                          maxLines: 1, 
+                          overflow: TextOverflow.ellipsis
+                        ),
+                        subtitle: Text(
+                          '최근 수정: ${info['updated'].toString().split('T')[0]}', 
+                          style: const TextStyle(fontSize: 11, color: Colors.grey)
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.edit_note, size: 20, color: Colors.blueGrey),
+                              onPressed: () => widget.onEditTitle(info['file'], info['title']).then((_) => _refreshSavedList()),
+                              tooltip: '제목 수정',
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, size: 20, color: Colors.redAccent),
+                              onPressed: () => widget.onDeleteFile(info['file'], info['fileName']).then((_) => _refreshSavedList()),
+                              tooltip: '삭제',
+                            ),
+                          ],
+                        ),
+                        onTap: () async {
+                          await widget.onLoadFromFile(info['file']);
+                          setState(() {
+                            _currentFile = info['fileName'];
+                          });
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('[${info['title']}] 대회를 불러왔습니다.'), duration: const Duration(seconds: 1))
+                            );
+                          }
+                        },
+                      ),
+                    );
+                  },
+                ),
+        ),
+        const SizedBox(height: 16),
+        const Divider(height: 1),
+      ],
+    );
+  }
+
   Widget _buildSettingsContent() {
     return Container(
       color: Colors.white,
@@ -296,17 +430,18 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // 왼쪽 1/3: 영역별 폰트 설정 (여백 적게)
                 Expanded(
                   flex: 1,
                   child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(12, 10, 10, 16),
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Text('영역별 폰트 설정', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey, fontSize: 14)),
+                        _buildSavedTournamentsList(),
                         const SizedBox(height: 12),
+                        const Text('영역별 폰트 설정', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey, fontSize: 14)),
+                        const SizedBox(height: 10),
                         _buildFontSettingRow(
                           '대제목 (메인 이름)',
                           _tmpTitleFont,
@@ -398,10 +533,8 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
                   ),
                 ),
                 const VerticalDivider(width: 1),
-                // 중간 1/3: 여유 영역 (추후 확장용)
                 Expanded(flex: 1, child: Container(color: Colors.white)),
                 const VerticalDivider(width: 1),
-                // 오른쪽 1/3: 여유 영역 (추후 확장용)
                 Expanded(flex: 1, child: Container(color: Colors.white)),
               ],
             ),

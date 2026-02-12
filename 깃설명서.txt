@@ -1,0 +1,60 @@
+=========================================
+      깃(Git) & 깃허브(GitHub) 사용 설명서
+=========================================
+
+1. 현재 프로젝트 정보
+   - 사용자 ID: susungchio
+   - 저장소 이름: pingpong-win-
+   - 저장소 주소: https://github.com/susungchio/pingpong-win-.git
+
+-----------------------------------------
+
+2. 추가 수정된 코드를 올리는 방법 (Push)
+   코드를 수정한 후 다음 명령어를 순서대로 입력하세요.
+
+   ① 변경된 파일 담기:
+      git add .
+
+   ② 저장 기록 만들기 (메시지는 자유롭게 수정):
+      git commit -m "수정 내용 입력"
+
+   ③ 서버로 올리기:
+      git push origin main
+
+   ※ 만약 태그(버전)를 붙여서 올리고 싶다면:
+      git tag -a "버전명" -m "설명"
+      git push origin "버전명"
+
+-----------------------------------------
+
+3. 코드를 내려받는 방법 (Clone / Pull)
+
+   [처음 전체를 내려받을 때 (Clone)]:
+   - 원하는 폴더로 이동 후 터미널에 입력:
+   git clone https://github.com/susungchio/pingpong-win-.git
+
+   [이미 있는 폴더에서 최신 내용만 가져올 때 (Pull)]:
+   - 해당 프로젝트 폴더 안에서 입력:
+   git pull origin main
+
+-----------------------------------------
+
+4. 다른 프로젝트를 새로 저장하는 방법
+
+   ① 깃허브(github.com) 사이트에서 'New repository'를 생성합니다.
+   ② 새로운 프로젝트 폴더로 이동합니다 (cd 경로).
+   ③ 아래 명령어를 순서대로 입력합니다:
+
+      git init
+      git add .
+      git commit -m "첫 저장"
+      git remote add origin [새로 만든 저장소 주소]
+      git push -u origin main
+
+-----------------------------------------
+
+5. 주요 문제 해결 (Tip)
+   - "로그인하라"는 창이 뜨면: [Sign in with a code] 선택 후
+     브라우저(https://github.com/login/device)에 8자리 코드 입력.
+   - "remote origin already exists" 에러가 나면:
+     git remote remove origin  입력 후 다시 주소 등록.

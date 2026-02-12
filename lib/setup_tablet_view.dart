@@ -30,7 +30,6 @@ class _SetupTabletViewState extends State<SetupTabletView> with SetupLogicMixin<
   final _teamNameController = TextEditingController();
   final _bulkInputController = TextEditingController();
 
-  List<Map<String, dynamic>> _savedTournaments = [];
   bool _isDbManagementMode = false;
   List<MasterPlayer> _searchedMasterPlayers = [];
   bool _showAutoComplete = false;
@@ -47,7 +46,6 @@ class _SetupTabletViewState extends State<SetupTabletView> with SetupLogicMixin<
   void initState() {
     super.initState();
     initSetupData();
-    _refreshSavedList();
     _refreshMasterList();
     _checkDuplicatesCount();
     
@@ -193,24 +191,6 @@ class _SetupTabletViewState extends State<SetupTabletView> with SetupLogicMixin<
     );
   }
 
-  Future<void> _refreshSavedList() async {
-    try {
-      final directory = await getApplicationDocumentsDirectory();
-      if (!await directory.exists()) return;
-      final entities = await directory.list().toList();
-      final files = entities.where((f) => f.path.contains('tournament_') && f.path.endsWith('.json')).toList();
-      List<Map<String, dynamic>> tempInfos = [];
-      for (var f in files) {
-        try {
-          final content = await File(f.path).readAsString();
-          final data = jsonDecode(content);
-          tempInfos.add({'file': File(f.path), 'title': data['title'] ?? '제목 없음', 'fileName': f.path.split(Platform.pathSeparator).last});
-        } catch (_) {}
-      }
-      setState(() { _savedTournaments = tempInfos; });
-    } catch (e) { debugPrint('Refresh list error: $e'); }
-  }
-
   void _goToGroupStage() {
     if (currentEvent == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('진행 종목을 선택해주세요.')));
@@ -296,19 +276,30 @@ class _SetupTabletViewState extends State<SetupTabletView> with SetupLogicMixin<
         const Divider(color: Colors.white24, height: 40, indent: 30, endIndent: 30),
         _sidebarItem(Icons.edit_document, '대회 설정 및 참가 등록', !_isDbManagementMode, () => setState(() { _isDbManagementMode = false; })),
         _sidebarItem(Icons.storage_rounded, '기초 선수 DB 관리', _isDbManagementMode, () { setState(() { _isDbManagementMode = true; _refreshMasterList(); _checkDuplicatesCount(); }); }),
-        _sidebarItem(Icons.settings_applications_rounded, '프로그램 설정', false, () { Navigator.push(context, MaterialPageRoute(builder: (ctx) => ProgramSettingsPage(events: events))); }),
+        _sidebarItem(Icons.settings_applications_rounded, '프로그램 설정', false, () { 
+          Navigator.push(context, MaterialPageRoute(builder: (ctx) => ProgramSettingsPage(
+            events: events,
+            currentFileName: currentFileName,
+            onLoadFromFile: (file) async {
+              await loadFromFile(file);
+              setState(() {});
+            },
+            onDeleteFile: (file, name) async {
+              _handleDeleteFile(file, name);
+            },
+            onEditTitle: (file, title) async {
+              _handleEditTitle(file, title);
+            },
+          ))).then((_) {
+            setState(() {});
+          }); 
+        }),
         const Divider(color: Colors.white24, height: 30),
         if (!_isDbManagementMode) ...[
-          _sidebarItem(Icons.save_rounded, '현재 상태 저장', false, () async { await saveData(); _refreshSavedList(); }),
+          _sidebarItem(Icons.save_rounded, '현재 상태 저장', false, () async { await saveData(); }),
           _sidebarItem(Icons.table_view_rounded, '엑셀 명단 로드', false, pickExcelFile),
           _sidebarItem(Icons.refresh_rounded, '새 대회 시작', false, _handleReset),
           const Divider(color: Colors.white24, height: 30),
-          const Padding(padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8), child: Row(children: [Icon(Icons.history_rounded, color: Colors.white70, size: 16), SizedBox(width: 8), Text('저장된 대회 목록', style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold))])),
-          Expanded(child: _savedTournaments.isEmpty ? const Center(child: Text('저장된 대회가 없음', style: TextStyle(color: Colors.white24, fontSize: 12))) : ListView.builder(itemCount: _savedTournaments.length, itemBuilder: (context, index) {
-            final info = _savedTournaments[index];
-            bool isCurrent = currentFileName == info['fileName'];
-            return ListTile(dense: true, selected: isCurrent, selectedTileColor: Colors.white.withOpacity(0.1), leading: Icon(Icons.description_outlined, color: isCurrent ? Colors.amber : Colors.white54, size: 18), title: Text(info['title'], style: TextStyle(color: isCurrent ? Colors.amber : Colors.white, fontSize: 13, fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal), maxLines: 1, overflow: TextOverflow.ellipsis), onTap: () async { await loadFromFile(info['file']); setState(() {}); }, trailing: Row(mainAxisSize: MainAxisSize.min, children: [IconButton(icon: const Icon(Icons.edit_note_rounded, color: Colors.white38, size: 18), onPressed: () => _handleEditTitle(info['file'], info['title']), tooltip: '제목 수정'), IconButton(icon: const Icon(Icons.delete_forever_rounded, color: Colors.white24, size: 18), onPressed: () => _handleDeleteFile(info['file'], info['fileName']), tooltip: '삭제')]));
-          })),
         ] else const Expanded(child: SizedBox()),
         const Divider(color: Colors.white24, height: 1),
         const Spacer(),
@@ -412,7 +403,7 @@ class _SetupTabletViewState extends State<SetupTabletView> with SetupLogicMixin<
     return SingleChildScrollView(
       padding: const EdgeInsets.all(40),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [Expanded(child: TextField(controller: titleController, onEditingComplete: () { saveData(); _refreshSavedList(); }, style: Theme.of(context).textTheme.displayLarge?.copyWith(fontWeight: FontWeight.bold, color: const Color(0xFF1A535C)), decoration: const InputDecoration(border: InputBorder.none, hintText: '대회 명칭을 입력하세요'))), if (currentFileName == null) ElevatedButton.icon(onPressed: _handleInitialSave, icon: const Icon(Icons.save_alt), label: const Text('대회 파일 생성/고정'), style: ElevatedButton.styleFrom(backgroundColor: Colors.amber, foregroundColor: Colors.black87))]),
+        Row(children: [Expanded(child: TextField(controller: titleController, onEditingComplete: () { saveData(); }, style: Theme.of(context).textTheme.displayLarge?.copyWith(fontWeight: FontWeight.bold, color: const Color(0xFF1A535C)), decoration: const InputDecoration(border: InputBorder.none, hintText: '대회 명칭을 입력하세요'))), if (currentFileName == null) ElevatedButton.icon(onPressed: _handleInitialSave, icon: const Icon(Icons.save_alt), label: const Text('대회 파일 생성/고정'), style: ElevatedButton.styleFrom(backgroundColor: Colors.amber, foregroundColor: Colors.black87))]),
         const SizedBox(height: 32),
         Text('진행 종목', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, color: Colors.grey)),
         const SizedBox(height: 12),
@@ -455,7 +446,12 @@ class _SetupTabletViewState extends State<SetupTabletView> with SetupLogicMixin<
               ),
             );
           }),
-          ActionChip(avatar: const Icon(Icons.add, size: 18), label: const Text('종목 추가'), onPressed: () => showAddEventDialog(context), backgroundColor: Colors.orange.shade50),
+          ActionChip(
+            avatar: const Icon(Icons.add, size: 18), 
+            label: const Text('종목 추가'), 
+            onPressed: () => Future.delayed(Duration.zero, () => showAddEventDialog(context)),
+            backgroundColor: Colors.orange.shade50
+          ),
         ]);
       },
     );
@@ -917,9 +913,9 @@ class _SetupTabletViewState extends State<SetupTabletView> with SetupLogicMixin<
     }
   }
 
-  void _handleEditTitle(File file, String currentTitle) { final editController = TextEditingController(text: currentTitle); showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text('대회 이름 수정'), content: TextField(controller: editController, autofocus: true, decoration: const InputDecoration(labelText: '대회 명칭')), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')), TextButton(onPressed: () async { if (editController.text.isNotEmpty) { final content = await file.readAsString(); final data = jsonDecode(content); data['title'] = editController.text; await file.writeAsString(jsonEncode(data)); if (currentFileName == file.path.split(Platform.pathSeparator).last) { setState(() { titleController.text = editController.text; }); } _refreshSavedList(); Navigator.pop(ctx); } }, child: const Text('수정'))])); }
-  void _handleDeleteFile(File file, String fileName) { showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text('대회 파일 삭제'), content: const Text('이 대회 데이터를 영구적으로 삭제하시겠습니까?'), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')), TextButton(onPressed: () { file.deleteSync(); _refreshSavedList(); if (currentFileName == fileName) setState(() => currentFileName = null); Navigator.pop(ctx); }, child: const Text('삭제', style: TextStyle(color: Colors.red)))])); }
-  void _handleInitialSave() async { final timestamp = DateTime.now().millisecondsSinceEpoch; currentFileName = 'tournament_$timestamp.json'; await saveData(); await _refreshSavedList(); setState(() {}); if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('대회 파일이 생성되었습니다.'))); }
+  void _handleEditTitle(File file, String currentTitle) { final editController = TextEditingController(text: currentTitle); showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text('대회 이름 수정'), content: TextField(controller: editController, autofocus: true, decoration: const InputDecoration(labelText: '대회 명칭')), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')), TextButton(onPressed: () async { if (editController.text.isNotEmpty) { final content = await file.readAsString(); final data = jsonDecode(content); data['title'] = editController.text; await file.writeAsString(jsonEncode(data)); if (currentFileName == file.path.split(Platform.pathSeparator).last) { setState(() { titleController.text = editController.text; }); } Navigator.pop(ctx); } }, child: const Text('수정'))])); }
+  void _handleDeleteFile(File file, String fileName) { showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text('대회 파일 삭제'), content: const Text('이 대회 데이터를 영구적으로 삭제하시겠습니까?'), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')), TextButton(onPressed: () { file.deleteSync(); if (currentFileName == fileName) setState(() => currentFileName = null); Navigator.pop(ctx); }, child: const Text('삭제', style: TextStyle(color: Colors.red)))])); }
+  void _handleInitialSave() async { final timestamp = DateTime.now().millisecondsSinceEpoch; currentFileName = 'tournament_$timestamp.json'; await saveData(); setState(() {}); if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('대회 파일이 생성되었습니다.'))); }
   void _handleReset() { showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text('초기화 확인'), content: const Text('현재 작업 중인 데이터가 초기화됩니다. 새로 시작하시겠습니까?'), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')), TextButton(onPressed: () { setState(() { events.clear(); currentFileName = null; titleController.text = '새 탁구 대회'; }); Navigator.pop(ctx); }, child: const Text('확인', style: TextStyle(color: Colors.red)))])); }
   void _startTournament() {
     currentEvent!.groups ??= TournamentLogic.generateGroups(currentEvent!.players, currentEvent!.settings);
@@ -936,4 +932,7 @@ class _SetupTabletViewState extends State<SetupTabletView> with SetupLogicMixin<
     }
     Navigator.push(context, MaterialPageRoute(builder: (context) => GroupStagePage(tournamentBaseTitle: titleController.text, allEvents: eventsToShow, initialEventIdx: initialIdx, onDataChanged: saveData)));
   }
+
+  // showAddEventDialog 메서드는 SetupLogicMixin에서 상속받아 사용
+  // 중복된 메서드 제거: setup_logic_mixin.dart의 수정된 Dialog 버전 사용
 }

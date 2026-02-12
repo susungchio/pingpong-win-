@@ -325,48 +325,203 @@ mixin SetupLogicMixin<T extends StatefulWidget> on State<T> {
           }
 
           Widget buildPresetList(List<String> list, bool isLeft) {
+            // ListView.separated 대신 Column + SingleChildScrollView 사용: intrinsic dimensions 계산 문제 방지
             return Container(
               decoration: BoxDecoration(color: Colors.white, border: Border.all(color: Colors.grey.shade200), borderRadius: BorderRadius.circular(8)),
-              child: ListView.separated(
-                shrinkWrap: true, itemCount: list.length, separatorBuilder: (ctx, i) => const Divider(height: 1),
-                itemBuilder: (ctx, idx) => ListTile(
-                  dense: true, title: Text(list[idx], style: const TextStyle(fontSize: 14)),
-                  trailing: IconButton(icon: const Icon(Icons.remove_circle_outline, size: 16, color: Colors.redAccent), onPressed: () { setDialogState(() => list.removeAt(idx)); savePresets(); }),
-                  onTap: () { if (events.any((e) => e.name == list[idx] && e.teamSize == selectedTeamSize)) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('이미 동일한 종목이 존재합니다.'))); return; } setState(() { events.add(TournamentEvent(id: uuid.v4(), name: list[idx], teamSize: selectedTeamSize)); selectedEventIdx = events.length - 1; }); saveData(); Navigator.pop(context); },
-                  hoverColor: isLeft ? Colors.blue.withOpacity(0.05) : Colors.green.withOpacity(0.05),
+              child: SingleChildScrollView(
+                child: Column(
+                  // mainAxisSize.min 제거: intrinsic dimensions 계산 문제 방지
+                  children: [
+                    for (int idx = 0; idx < list.length; idx++) ...[
+                      ListTile(
+                        dense: true,
+                        title: Text(list[idx], style: const TextStyle(fontSize: 14)),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.remove_circle_outline, size: 16, color: Colors.redAccent),
+                          onPressed: () {
+                            setDialogState(() => list.removeAt(idx));
+                            savePresets();
+                          },
+                        ),
+                        onTap: () {
+                          if (events.any((e) => e.name == list[idx] && e.teamSize == selectedTeamSize)) {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('이미 동일한 종목이 존재합니다.')));
+                            return;
+                          }
+                          setState(() {
+                            events.add(TournamentEvent(id: uuid.v4(), name: list[idx], teamSize: selectedTeamSize));
+                            selectedEventIdx = events.length - 1;
+                          });
+                          saveData();
+                          Navigator.pop(context);
+                        },
+                        hoverColor: isLeft ? Colors.blue.withOpacity(0.05) : Colors.green.withOpacity(0.05),
+                      ),
+                      if (idx < list.length - 1) const Divider(height: 1),
+                    ],
+                  ],
                 ),
               ),
             );
           }
 
-          return AlertDialog(
-            title: const Row(children: [Icon(Icons.settings_suggest, color: Color(0xFF1A535C)), SizedBox(width: 12), Text('종목 추가 및 관리')]),
-            content: SizedBox(width: 1000, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('종목 직접 입력 및 추가', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1A535C))),
-              const SizedBox(height: 16),
-              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Expanded(flex: 3, child: Column(children: [
-                  TextField(controller: eventNameController, decoration: const InputDecoration(labelText: '종목 이름 입력', border: OutlineInputBorder(), hintText: '예: 남자 60대부'), onSubmitted: (v) => handleAddAction(v, selectedTeamSize)),
-                  const SizedBox(height: 8),
-                  Row(children: [const Text('자주 쓰는 종목에 추가:', style: TextStyle(fontSize: 13, color: Colors.grey)), const SizedBox(width: 12), FilterChip(label: const Text('왼쪽 그룹'), selected: addToLeft, onSelected: (v) => setDialogState(() => addToLeft = v), selectedColor: Colors.blue.shade100), const SizedBox(width: 8), FilterChip(label: const Text('오른쪽 그룹'), selected: addToRight, onSelected: (v) => setDialogState(() => addToRight = v), selectedColor: Colors.green.shade100)]),
-                ])),
-                const SizedBox(width: 16),
-                Expanded(flex: 2, child: DropdownButtonFormField<int>(value: selectedTeamSize, decoration: const InputDecoration(labelText: '인원 구성', border: OutlineInputBorder()), items: [1, 2, 3, 4, 5].map((n) => DropdownMenuItem(value: n, child: Text(n == 1 ? '개인전' : '$n인 단체/복식'))).toList(), onChanged: (v) => setDialogState(() => selectedTeamSize = v!))),
-                const SizedBox(width: 16),
-                ElevatedButton(onPressed: () => handleAddAction(eventNameController.text, selectedTeamSize), style: ElevatedButton.styleFrom(backgroundColor: (addToLeft || addToRight) ? Colors.blueGrey : const Color(0xFF1A535C), foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 55)), child: Text((addToLeft || addToRight) ? '리스트 등록' : '종목 추가', style: const TextStyle(fontWeight: FontWeight.bold))),
-              ]),
-              const SizedBox(height: 12),
-              if (addToLeft || addToRight) const Text('※ 그룹 체크 시 리스트에만 등록되며 대회에는 추가되지 않습니다.', style: TextStyle(fontSize: 12, color: Colors.redAccent, fontWeight: FontWeight.w500)),
-              const SizedBox(height: 40),
-              const Text('자주 쓰는 종목 선택 (클릭 시 즉시 추가)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1A535C))),
-              const SizedBox(height: 16),
-              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Padding(padding: EdgeInsets.only(bottom: 8), child: Text('◀ 왼쪽 그룹', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold))), SizedBox(height: 400, child: buildPresetList(presetsLeft, true))])),
-                const SizedBox(width: 24),
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Padding(padding: EdgeInsets.only(bottom: 8), child: Text('오른쪽 그룹 ▶', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold))), SizedBox(height: 400, child: buildPresetList(presetsRight, false))])),
-              ]),
-            ]))),
-            actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('닫기'))],
+          // AlertDialog 대신 Dialog 사용: intrinsic dimensions 계산 문제 방지
+          return Dialog(
+            child: ConstrainedBox(
+              // 명시적인 크기 제약: Windows 환경 대응
+              constraints: const BoxConstraints(maxWidth: 1000, maxHeight: 800),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 제목 영역
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF1A535C),
+                      borderRadius: BorderRadius.only(topLeft: Radius.circular(12), topRight: Radius.circular(12)),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.settings_suggest, color: Colors.white),
+                        SizedBox(width: 12),
+                        Text('종목 추가 및 관리', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  ),
+                  // 내용 영역
+                  Flexible(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('종목 직접 입력 및 추가', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1A535C))),
+                          const SizedBox(height: 16),
+                          // Row에 명시적인 크기 제약 추가
+                          LayoutBuilder(
+                            builder: (context, constraints) {
+                              return Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    flex: 3,
+                                    child: Column(
+                                      children: [
+                                        TextField(
+                                          controller: eventNameController,
+                                          decoration: const InputDecoration(labelText: '종목 이름 입력', border: OutlineInputBorder(), hintText: '예: 남자 60대부'),
+                                          onSubmitted: (v) => handleAddAction(v, selectedTeamSize),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Row(
+                                          children: [
+                                            const Text('자주 쓰는 종목에 추가:', style: TextStyle(fontSize: 13, color: Colors.grey)),
+                                            const SizedBox(width: 12),
+                                            FilterChip(
+                                              label: const Text('왼쪽 그룹'),
+                                              selected: addToLeft,
+                                              onSelected: (v) => setDialogState(() => addToLeft = v),
+                                              selectedColor: Colors.blue.shade100,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            FilterChip(
+                                              label: const Text('오른쪽 그룹'),
+                                              selected: addToRight,
+                                              onSelected: (v) => setDialogState(() => addToRight = v),
+                                              selectedColor: Colors.green.shade100,
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    flex: 2,
+                                    child: DropdownButtonFormField<int>(
+                                      value: selectedTeamSize,
+                                      decoration: const InputDecoration(labelText: '인원 구성', border: OutlineInputBorder()),
+                                      items: [1, 2, 3, 4, 5].map((n) => DropdownMenuItem(value: n, child: Text(n == 1 ? '개인전' : '$n인 단체/복식'))).toList(),
+                                      onChanged: (v) => setDialogState(() => selectedTeamSize = v!),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  // ElevatedButton의 minimumSize에서 double.infinity 제거
+                                  Expanded(
+                                    child: ElevatedButton(
+                                      onPressed: () => handleAddAction(eventNameController.text, selectedTeamSize),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: (addToLeft || addToRight) ? Colors.blueGrey : const Color(0xFF1A535C),
+                                        foregroundColor: Colors.white,
+                                        minimumSize: const Size(0, 55), // double.infinity 대신 0 사용
+                                      ),
+                                      child: Text((addToLeft || addToRight) ? '리스트 등록' : '종목 추가', style: const TextStyle(fontWeight: FontWeight.bold)),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 12),
+                          if (addToLeft || addToRight)
+                            const Text('※ 그룹 체크 시 리스트에만 등록되며 대회에는 추가되지 않습니다.', style: TextStyle(fontSize: 12, color: Colors.redAccent, fontWeight: FontWeight.w500)),
+                          const SizedBox(height: 40),
+                          const Text('자주 쓰는 종목 선택 (클릭 시 즉시 추가)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1A535C))),
+                          const SizedBox(height: 16),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Padding(
+                                      padding: EdgeInsets.only(bottom: 8),
+                                      child: Text('◀ 왼쪽 그룹', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
+                                    ),
+                                    SizedBox(height: 400, child: buildPresetList(presetsLeft, true)),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 24),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Padding(
+                                      padding: EdgeInsets.only(bottom: 8),
+                                      child: Text('오른쪽 그룹 ▶', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+                                    ),
+                                    SizedBox(height: 400, child: buildPresetList(presetsRight, false)),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // 하단 버튼 영역
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(12), bottomRight: Radius.circular(12)),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('닫기'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           );
         },
       ),
