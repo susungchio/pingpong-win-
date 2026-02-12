@@ -1,7 +1,7 @@
+import 'dart:io';
 import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:path/path.dart';
-import 'package:path_provider/path_provider.dart';
 import 'models.dart';
 
 class DatabaseService {
@@ -17,13 +17,10 @@ class DatabaseService {
     return _database!;
   }
 
-  /// 기초선수 DB 필드 순서: 번호, 지역, 동호회, 이름, 성별, 부수, 누적점수 (7필드)
   static const String _tableMasterPlayers = 'master_players';
   static const int _dbVersion = 3;
 
   Future<Database> _initDatabase() async {
-    final directory = await getApplicationDocumentsDirectory();
-    final path = join(directory.path, 'pingpong_master_v2.db');
 
     return await openDatabase(
       path,
@@ -37,7 +34,6 @@ class DatabaseService {
     );
   }
 
-  /// 테이블 생성 — 컬럼 순서: id, 번호, 지역, 동호회, 이름, 성별, 부수, 누적점수
   Future<void> _createMasterPlayersTable(Database db) async {
     await db.execute('''
       CREATE TABLE $_tableMasterPlayers (
@@ -54,7 +50,6 @@ class DatabaseService {
     ''');
   }
 
-  /// v3 마이그레이션: 기존 테이블·자료 삭제 후 올바른 필드 순서(지역·성별 포함)로 재생성
   Future<void> _migrateToV3(Database db) async {
     await db.execute('DROP TABLE IF EXISTS $_tableMasterPlayers');
     await _createMasterPlayersTable(db);
@@ -127,7 +122,6 @@ class DatabaseService {
     return Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM master_players')) ?? 0;
   }
 
-  /// 기초선수 DB에서 부수(tier)별 인원 수 집계. 키: 부수 명칭(빈 값은 "(미지정)"), 값: 인원 수
   Future<Map<String, int>> getTierStats() async {
     final db = await database;
     final rows = await db.rawQuery(

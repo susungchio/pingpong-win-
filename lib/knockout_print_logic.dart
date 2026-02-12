@@ -1,12 +1,13 @@
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart' show BuildContext, Scaffold, AppBar, Text, Navigator, MaterialPageRoute, VoidCallback;
 import 'package:printing/printing.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:path/path.dart';
 import 'models.dart';
 
 class KnockoutPrintLogic {
-  // 인쇄 미리보기 화면 표시 (Future를 반환하도록 수정)
   static Future<void> showPrintPreview(
     BuildContext context,
     String tournamentTitle,
@@ -21,7 +22,6 @@ class KnockoutPrintLogic {
           appBar: AppBar(title: const Text('경기 기록지 인쇄 미리보기')),
           body: PdfPreview(
             build: (format) {
-              // 인쇄 횟수 증가 로직을 PDF 생성 시점에 실행
               for (var round in rounds) {
                 for (var m in round.matches) {
                   if (selectedMatchIds.contains(m.id)) {
@@ -29,7 +29,7 @@ class KnockoutPrintLogic {
                   }
                 }
               }
-              onPrinted(); // 화면 갱신 및 저장 트리거
+              onPrinted();
               return _generatePdf(format, tournamentTitle, rounds, selectedMatchIds);
             },
             allowPrinting: true,
@@ -43,7 +43,6 @@ class KnockoutPrintLogic {
     );
   }
 
-  // PDF 생성을 위한 메인 로직
   static Future<Uint8List> _generatePdf(
     PdfPageFormat format,
     String tournamentTitle,
@@ -51,25 +50,42 @@ class KnockoutPrintLogic {
     Set<String> selectedMatchIds,
   ) async {
     final doc = pw.Document();
-    final font = await PdfGoogleFonts.nanumGothicRegular();
-    final fontBold = await PdfGoogleFonts.nanumGothicBold();
+
+    // --- 폰트 로드 로직 수정 (오프라인 대응) ---
+    final exePath = File(Platform.resolvedExecutable).parent.path;
+    final fontPath = join(exePath, 'fonts', 'NanumGothic.ttf');
+    final fontBoldPath = join(exePath, 'fonts', 'NanumGothic-Bold.ttf');
+
+    pw.Font font;
+    pw.Font fontBold;
+
+    // 로컬 fonts 폴더에 파일이 있으면 사용, 없으면 구글 폰트(온라인) 사용
+    if (await File(fontPath).exists()) {
+      final fontData = await File(fontPath).readAsBytes();
+      font = pw.Font.ttf(fontData.buffer.asByteData());
+    } else {
+      font = await PdfGoogleFonts.nanumGothicRegular();
+    }
+
+    if (await File(fontBoldPath).exists()) {
+      final fontData = await File(fontBoldPath).readAsBytes();
+      fontBold = pw.Font.ttf(fontData.buffer.asByteData());
+    } else {
+      fontBold = await PdfGoogleFonts.nanumGothicBold();
+    }
+
     final iconFont = await PdfGoogleFonts.materialIcons();
 
-    // 1. 인쇄 대상 분류 (중복 인쇄 방지)
     List<Map<String, dynamic>> standardTasks = [];
     List<Map<String, dynamic>> bracketTasks = [];
 
     for (int r = 0; r < rounds.length; r++) {
       for (var m in rounds[r].matches) {
         if (selectedMatchIds.contains(m.id)) {
-          // 중복 인쇄 방지 로직 개선: 
-          // 부모(다음 라운드) 경기가 선택되어 있고, 그 부모 경기가 '브래킷(4인) 디자인'으로 인쇄될 예정일 때만 현재 경기를 생략합니다.
           bool parentWillIncludeMe = false;
           if (m.nextMatchId != null && selectedMatchIds.contains(m.nextMatchId)) {
             try {
               final parentMatch = rounds[r + 1].matches.firstWhere((pm) => pm.id == m.nextMatchId);
-              // 부모 경기의 두 선수가 모두 확정되지 않은 경우에만 부모가 브래킷 디자인(4인)을 사용하므로, 
-              // 그 경우에만 현재 경기가 부모 인쇄물에 포함된 것으로 간주합니다.
               bool parentBothPlayersKnown = parentMatch.player1 != null && parentMatch.player2 != null;
               if (!parentBothPlayersKnown) {
                 parentWillIncludeMe = true;
@@ -79,10 +95,7 @@ class KnockoutPrintLogic {
           
           if (!parentWillIncludeMe) {
             final task = {'match': m, 'roundIdx': r, 'roundName': rounds[r].name};
-            
-            // [수정] 두 선수가 모두 정해진 경우 2인용 디자인(standard) 사용
             bool bothPlayersKnown = m.player1 != null && m.player2 != null;
-            
             if (r == 0 || bothPlayersKnown) {
               standardTasks.add(task);
             } else {
@@ -93,7 +106,6 @@ class KnockoutPrintLogic {
       }
     }
 
-    // 2. 2인 경기 기록지 (한 페이지 2매)
     for (int i = 0; i < standardTasks.length; i += 2) {
       final t1 = standardTasks[i];
       final t2 = (i + 1 < standardTasks.length) ? standardTasks[i + 1] : null;
@@ -111,7 +123,6 @@ class KnockoutPrintLogic {
       ));
     }
 
-    // 3. 4인 브래킷 경기 기록지 (한 페이지 2매)
     for (int i = 0; i < bracketTasks.length; i += 2) {
       final t1 = bracketTasks[i];
       final t2 = (i + 1 < bracketTasks.length) ? bracketTasks[i + 1] : null;
@@ -133,7 +144,6 @@ class KnockoutPrintLogic {
     return doc.save();
   }
 
-  /// [디자인 1] 표준 2인용 기록지
   static pw.Widget _buildStandardSheet(Match m, String rName, String title, pw.Font font, pw.Font fontBold) {
     const double rowH = 38.0;
     final cyanColor = PdfColor.fromHex('#B3E5FC');
@@ -172,7 +182,6 @@ class KnockoutPrintLogic {
     );
   }
 
-  /// [디자인 2] 4인용 브래킷 섹션 (제공된 디자인 적용)
   static pw.Widget _buildBracketSection(Match headMatch, int rIdx, List<Round> rounds, String title, pw.Font font, pw.Font fontBold) {
     List<Match> children = rounds[rIdx - 1].matches.where((m) => m.nextMatchId == headMatch.id).toList();
     Match? leftMatch = children.isNotEmpty ? children[0] : null;
