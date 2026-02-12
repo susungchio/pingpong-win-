@@ -318,8 +318,20 @@ mixin SetupLogicMixin<T extends StatefulWidget> on State<T> {
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('자주 쓰는 종목 리스트에 등록되었습니다.'), duration: Duration(seconds: 1)));
               return;
             }
-            if (events.any((e) => e.name == trimmedName && e.teamSize == teamSize)) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('이미 동일한 종목이 존재합니다.'))); return; }
-            setState(() { events.add(TournamentEvent(id: uuid.v4(), name: trimmedName, teamSize: teamSize)); selectedEventIdx = events.length - 1; });
+            // 같은 이름의 종목이 이미 존재하는지 확인 (이름만 체크)
+            if (events.any((e) => e.name.trim() == trimmedName)) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('같은 이름의 종목이 이미 존재합니다.'), 
+                  duration: Duration(seconds: 2)
+                )
+              );
+              return;
+            }
+            setState(() { 
+              events.add(TournamentEvent(id: uuid.v4(), name: trimmedName, teamSize: teamSize)); 
+              selectedEventIdx = events.length - 1; 
+            });
             saveData();
             Navigator.pop(context);
           }
@@ -344,8 +356,14 @@ mixin SetupLogicMixin<T extends StatefulWidget> on State<T> {
                           },
                         ),
                         onTap: () {
-                          if (events.any((e) => e.name == list[idx] && e.teamSize == selectedTeamSize)) {
-                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('이미 동일한 종목이 존재합니다.')));
+                          // 같은 이름의 종목이 이미 존재하는지 확인 (이름만 체크)
+                          if (events.any((e) => e.name.trim() == list[idx].trim())) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('같은 이름의 종목이 이미 존재합니다.'), 
+                                duration: Duration(seconds: 2)
+                              )
+                            );
                             return;
                           }
                           setState(() {

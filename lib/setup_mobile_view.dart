@@ -26,13 +26,22 @@ class SetupMobileView extends StatefulWidget {
 class _SetupMobileViewState extends State<SetupMobileView> with SetupLogicMixin {
   final _nameController = TextEditingController();
   final _affController = TextEditingController();
-  final List<TextEditingController> _teamMemberControllers = List.generate(5, (_) => TextEditingController());
+  List<TextEditingController> _teamMemberControllers = [];
   final _teamNameController = TextEditingController();
+  int _lastTeamSize = 0; // 마지막으로 설정된 팀 인원수 추적
 
   @override
   void initState() {
     super.initState();
     initSetupData();
+  }
+
+  @override
+  void afterLoadFromFile(Map<String, dynamic> data) {
+    // 파일 로드 후 현재 선택된 종목의 teamSize에 맞게 컨트롤러 업데이트
+    if (currentEvent != null && currentEvent!.teamSize > 1) {
+      _updateTeamMemberControllers(currentEvent!.teamSize);
+    }
   }
 
   @override
@@ -42,6 +51,22 @@ class _SetupMobileViewState extends State<SetupMobileView> with SetupLogicMixin 
     _teamNameController.dispose();
     for (var c in _teamMemberControllers) c.dispose();
     super.dispose();
+  }
+
+  // 단체전 인원수에 따라 컨트롤러 리스트를 동적으로 생성/조정
+  void _updateTeamMemberControllers(int teamSize) {
+    // 단체전인 경우 예비 선수 1명 포함 (예: 5인 단체전이면 6명 등록)
+    final int totalMembers = teamSize > 1 ? teamSize + 1 : 0;
+    
+    if (_lastTeamSize != totalMembers) {
+      // 기존 컨트롤러 정리
+      for (var c in _teamMemberControllers) {
+        c.dispose();
+      }
+      // 새로운 컨트롤러 생성
+      _teamMemberControllers = List.generate(totalMembers, (_) => TextEditingController());
+      _lastTeamSize = totalMembers;
+    }
   }
 
   // 선수의 추가/삭제 제한을 포함한 보안 업데이트 함수
@@ -279,11 +304,16 @@ class _SetupMobileViewState extends State<SetupMobileView> with SetupLogicMixin 
 
   Widget _topMenuButton(IconData icon, String label, Color color, VoidCallback onTap) => InkWell(onTap: onTap, child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(icon, color: color, size: 24), const SizedBox(height: 2), Text(label, style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.bold))]));
   Widget _buildTitleInput() => Card(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0), child: Row(children: [Expanded(child: TextField(controller: titleController, onEditingComplete: saveData, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1A535C)), decoration: const InputDecoration(labelText: '대회 제목', border: InputBorder.none))), IconButton(icon: Icon(currentFileName == null ? Icons.save_outlined : Icons.check_circle_rounded, color: currentFileName == null ? Colors.grey : Colors.blue, size: 28), onPressed: _handleInitialSave)])));
-  Widget _buildEventSelector() => SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [...events.asMap().entries.map((e) => Padding(padding: const EdgeInsets.only(right: 8.0), child: GestureDetector(onLongPress: () { _secureSettingUpdate(() { showDialog(context: context, builder: (context) => AlertDialog(title: const Text('종목 삭제'), content: Text('[${e.value.name}]을 삭제할까요?'), actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')), TextButton(onPressed: () { setState(() { events.removeAt(e.key); selectedEventIdx = 0; }); saveData(); Navigator.pop(context); }, child: const Text('삭제', style: TextStyle(color: Colors.red)))],)); }); }, child: ChoiceChip(label: Text(e.value.name), selected: selectedEventIdx == e.key, selectedColor: const Color(0xFF1A535C), labelStyle: TextStyle(color: selectedEventIdx == e.key ? Colors.white : Colors.black, fontWeight: FontWeight.bold), onSelected: (selected) { if (selected) setState(() => selectedEventIdx = e.key); },),),)), ActionChip(avatar: const Icon(Icons.add, size: 20), label: const Text('종목 추가'), onPressed: () => showAddEventDialog(context), backgroundColor: Colors.orange.shade50)]));
+  Widget _buildEventSelector() => SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [...events.asMap().entries.map((e) => Padding(padding: const EdgeInsets.only(right: 8.0), child: GestureDetector(onLongPress: () { _secureSettingUpdate(() { showDialog(context: context, builder: (context) => AlertDialog(title: const Text('종목 삭제'), content: Text('[${e.value.name}]을 삭제할까요?'), actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')), TextButton(onPressed: () { setState(() { events.removeAt(e.key); selectedEventIdx = 0; }); saveData(); Navigator.pop(context); }, child: const Text('삭제', style: TextStyle(color: Colors.red)))],)); }); }, child: ChoiceChip(label: Text(e.value.name), selected: selectedEventIdx == e.key, selectedColor: const Color(0xFF1A535C), labelStyle: TextStyle(color: selectedEventIdx == e.key ? Colors.white : Colors.black, fontWeight: FontWeight.bold), onSelected: (selected) { if (selected) { setState(() { selectedEventIdx = e.key; if (currentEvent != null && currentEvent!.teamSize > 1) { _updateTeamMemberControllers(currentEvent!.teamSize); } }); } },),),)), ActionChip(avatar: const Icon(Icons.add, size: 20), label: const Text('종목 추가'), onPressed: () => showAddEventDialog(context), backgroundColor: Colors.orange.shade50)]));
 
   Widget _buildPlayerInput(bool isKnockoutStarted) {
     if (currentEvent == null) return const SizedBox.shrink();
+    
+    // 단체전인 경우 인원수에 따라 컨트롤러 업데이트
     if (currentEvent!.teamSize > 1) {
+      _updateTeamMemberControllers(currentEvent!.teamSize);
+      final int totalMembers = currentEvent!.teamSize + 1; // 예비 선수 1명 포함
+      
       return Card(
         color: isKnockoutStarted ? Colors.grey.shade50 : const Color(0xFFF8F9FA),
         child: Padding(
@@ -291,23 +321,158 @@ class _SetupMobileViewState extends State<SetupMobileView> with SetupLogicMixin 
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(children: [const Icon(Icons.group, color: Color(0xFF1A535C), size: 20), const SizedBox(width: 8), Text('${currentEvent!.teamSize}인 단체전 팀 등록', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1A535C))), if (isKnockoutStarted) const Padding(padding: EdgeInsets.only(left: 8), child: Text('(본선 시작-추가불가)', style: TextStyle(color: Colors.red, fontSize: 11)))]),
+              Row(children: [
+                const Icon(Icons.group, color: Color(0xFF1A535C), size: 20), 
+                const SizedBox(width: 8), 
+                Text('${currentEvent!.teamSize}인 단체전 선수 등록', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1A535C))), 
+                if (isKnockoutStarted) const Padding(padding: EdgeInsets.only(left: 8), child: Text('(본선 시작-추가불가)', style: TextStyle(color: Colors.red, fontSize: 11)))
+              ]),
               const SizedBox(height: 12),
-              TextField(controller: _teamNameController, enabled: !isKnockoutStarted, decoration: const InputDecoration(labelText: '팀명 (클럽명)', border: OutlineInputBorder(), isDense: true)),
+              TextField(
+                controller: _teamNameController, 
+                enabled: !isKnockoutStarted, 
+                decoration: const InputDecoration(labelText: '팀명 (클럽명)', border: OutlineInputBorder(), isDense: true)
+              ),
               const SizedBox(height: 12),
-              Wrap(spacing: 8, runSpacing: 8, children: List.generate(currentEvent!.teamSize, (i) => SizedBox(width: (MediaQuery.of(context).size.width - 64) / 2, child: TextField(controller: _teamMemberControllers[i], enabled: !isKnockoutStarted, decoration: InputDecoration(labelText: '${i + 1}번 선수', border: const OutlineInputBorder(), isDense: true))))),
+              // 단체전 인원수 + 예비 선수 1명만큼 입력칸 생성
+              Wrap(
+                spacing: 8, 
+                runSpacing: 8, 
+                children: List.generate(
+                  totalMembers, 
+                  (i) => SizedBox(
+                    width: (MediaQuery.of(context).size.width - 64) / 2, 
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: i < _teamMemberControllers.length ? _teamMemberControllers[i] : null,
+                            enabled: !isKnockoutStarted && i < _teamMemberControllers.length, 
+                            decoration: InputDecoration(
+                              labelText: i < currentEvent!.teamSize ? '${i + 1}번 선수' : '예비 선수', 
+                              border: const OutlineInputBorder(), 
+                              isDense: true
+                            ),
+                            onChanged: (value) {
+                              if (value.trim().isEmpty) {
+                                setState(() {});
+                              }
+                            },
+                          )
+                        ),
+                        if (i < _teamMemberControllers.length && 
+                            _teamMemberControllers[i].text.trim().isNotEmpty && 
+                            !isKnockoutStarted)
+                          IconButton(
+                            icon: const Icon(Icons.clear, size: 18, color: Colors.red),
+                            onPressed: () {
+                              setState(() {
+                                _teamMemberControllers[i].clear();
+                              });
+                            },
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
+                      ],
+                    )
+                  )
+                )
+              ),
               const SizedBox(height: 12),
-              ElevatedButton.icon(onPressed: isKnockoutStarted ? null : _addTeamEntry, icon: const Icon(Icons.add_task), label: const Text('단체전 팀 등록하기'), style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6B6B), foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 45))),
+              ElevatedButton.icon(
+                onPressed: isKnockoutStarted ? null : _addTeamEntry, 
+                icon: const Icon(Icons.add_task), 
+                label: const Text('단체전 팀 등록하기'), 
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6B6B), foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 45))
+              ),
             ],
           ),
         ),
       );
     }
-    return Card(child: Padding(padding: const EdgeInsets.all(8.0), child: Row(children: [Expanded(child: TextField(controller: _nameController, enabled: !isKnockoutStarted, decoration: const InputDecoration(hintText: '이름(부수)', border: InputBorder.none))), Expanded(child: TextField(controller: _affController, enabled: !isKnockoutStarted, decoration: const InputDecoration(hintText: '소속 (클럽명)', border: InputBorder.none))), IconButton.filled(onPressed: isKnockoutStarted ? null : _addSinglePlayer, icon: const Icon(Icons.add), style: IconButton.styleFrom(backgroundColor: const Color(0xFFFF6B6B)))])));
+    // 개인전인 경우
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(8.0), 
+        child: Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _nameController, 
+                enabled: !isKnockoutStarted, 
+                decoration: const InputDecoration(hintText: '이름(부수)', border: InputBorder.none)
+              )
+            ), 
+            Expanded(
+              child: TextField(
+                controller: _affController, 
+                enabled: !isKnockoutStarted, 
+                decoration: const InputDecoration(hintText: '소속 (클럽명)', border: InputBorder.none)
+              )
+            ), 
+            IconButton.filled(
+              onPressed: isKnockoutStarted ? null : _addSinglePlayer, 
+              icon: const Icon(Icons.add), 
+              style: IconButton.styleFrom(backgroundColor: const Color(0xFFFF6B6B))
+            )
+          ]
+        )
+      )
+    );
   }
 
   void _addSinglePlayer() => _secureSettingUpdate(() { if (_nameController.text.isNotEmpty) { currentEvent!.players.insert(0, Player(id: const Uuid().v4(), name: _nameController.text, affiliation: _affController.text.isEmpty ? '개인' : _affController.text)); _nameController.clear(); _affController.clear(); saveData(); } }, isPlayerAction: true);
-  void _addTeamEntry() => _secureSettingUpdate(() { if (_teamNameController.text.isEmpty) return; List<String> names = []; for (int i = 0; i < currentEvent!.teamSize; i++) { if (_teamMemberControllers[i].text.isNotEmpty) names.add(_teamMemberControllers[i].text.trim()); } if (names.isEmpty) return; currentEvent!.players.insert(0, Player(id: const Uuid().v4(), name: names.join(', '), affiliation: _teamNameController.text.trim())); _teamNameController.clear(); for (var c in _teamMemberControllers) c.clear(); saveData(); }, isPlayerAction: true);
+  void _addTeamEntry() => _secureSettingUpdate(() { 
+    if (_teamNameController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('팀명을 입력해주세요.')));
+      return;
+    }
+    
+    final teamName = _teamNameController.text.trim();
+    
+    // 팀명 중복 체크
+    final hasDuplicate = currentEvent!.players.any(
+      (p) => p.affiliation.trim() == teamName
+    );
+    if (hasDuplicate) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('같은 이름의 팀이 등록되었습니다.'), duration: Duration(seconds: 2))
+      );
+      return;
+    }
+    
+    // 단체전 인원수에 맞게 컨트롤러 업데이트
+    _updateTeamMemberControllers(currentEvent!.teamSize);
+    
+    // 입력된 선수 이름들을 리스트로 추출 (비어있지 않은 것만)
+    List<String> names = [];
+    final int totalMembers = currentEvent!.teamSize + 1; // 예비 선수 포함
+    
+    for (int i = 0; i < totalMembers && i < _teamMemberControllers.length; i++) {
+      if (_teamMemberControllers[i].text.isNotEmpty) {
+        names.add(_teamMemberControllers[i].text.trim());
+      }
+    }
+    
+    if (names.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('최소 한 명 이상의 선수를 입력해주세요.')));
+      return;
+    }
+    
+    currentEvent!.players.insert(0, Player(
+      id: const Uuid().v4(), 
+      name: names.join(', '), 
+      affiliation: _teamNameController.text.trim()
+    ));
+    
+    // 입력창 초기화
+    _teamNameController.clear();
+    for (var c in _teamMemberControllers) {
+      c.clear();
+    }
+    currentEvent!.groups = null;
+    saveData();
+  }, isPlayerAction: true);
 
   String _formatNames(String names) {
     if (names.isEmpty) return "";

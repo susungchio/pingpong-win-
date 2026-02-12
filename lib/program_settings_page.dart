@@ -12,6 +12,7 @@ class ProgramSettingsPage extends StatefulWidget {
   final Function(File) onLoadFromFile;
   final Function(File, String) onDeleteFile;
   final Function(File, String) onEditTitle;
+  final Function(String)? onDeleteEvent; // 경기종목 삭제 콜백
 
   const ProgramSettingsPage({
     super.key, 
@@ -20,6 +21,7 @@ class ProgramSettingsPage extends StatefulWidget {
     required this.onLoadFromFile,
     required this.onDeleteFile,
     required this.onEditTitle,
+    this.onDeleteEvent,
   });
 
   @override
@@ -281,9 +283,117 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
               Expanded(
                 child: Text(event.name, style: const TextStyle(fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
               ),
+              // 삭제 버튼 추가
+              IconButton(
+                icon: const Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
+                onPressed: () => _handleDeleteEvent(event),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                tooltip: '종목 삭제',
+              ),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  // 경기종목 삭제 처리 (시스템 비밀번호 확인)
+  void _handleDeleteEvent(TournamentEvent event) {
+    final savedPassword = systemAdminPasswordNotifier.value;
+    
+    // 시스템 비밀번호가 설정되어 있지 않으면 바로 삭제
+    if (savedPassword == null || savedPassword.isEmpty) {
+      _confirmDeleteEvent(event);
+      return;
+    }
+    
+    // 시스템 비밀번호 확인 다이얼로그
+    final pwController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('시스템 비밀번호 확인'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('경기종목을 삭제하려면 시스템 비밀번호를 입력하세요.', style: TextStyle(fontSize: 13)),
+            const SizedBox(height: 16),
+            TextField(
+              controller: pwController,
+              obscureText: true,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: '시스템 비밀번호',
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (_) {
+                if (pwController.text == savedPassword) {
+                  Navigator.pop(ctx);
+                  _confirmDeleteEvent(event);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('비밀번호가 틀렸습니다.'), backgroundColor: Colors.redAccent)
+                  );
+                }
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('취소'),
+          ),
+          TextButton(
+            onPressed: () {
+              if (pwController.text == savedPassword) {
+                Navigator.pop(ctx);
+                _confirmDeleteEvent(event);
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('비밀번호가 틀렸습니다.'), backgroundColor: Colors.redAccent)
+                );
+              }
+            },
+            child: const Text('확인'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 종목 삭제 확인 및 실행
+  void _confirmDeleteEvent(TournamentEvent event) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('경기종목 삭제'),
+        content: Text('[${event.name}] 종목을 삭제하시겠습니까?\n\n※ 등록된 선수 명단이 함께 삭제됩니다.', style: const TextStyle(fontSize: 13)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('취소'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              if (widget.onDeleteEvent != null) {
+                widget.onDeleteEvent!(event.id);
+                // 체크 상태에서도 제거
+                _eventCheckState.remove(event.id);
+                final next = Set<String>.from(eventUncheckedIdsNotifier.value);
+                next.remove(event.id);
+                eventUncheckedIdsNotifier.value = next;
+                saveEventDisplayChecked(next);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('[${event.name}] 종목이 삭제되었습니다.'), duration: const Duration(seconds: 1))
+                );
+              }
+            },
+            child: const Text('삭제', style: TextStyle(color: Colors.red)),
+          ),
+        ],
       ),
     );
   }

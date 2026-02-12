@@ -27,12 +27,14 @@ class KnockoutTabletView extends StatefulWidget {
 }
 
 class _KnockoutTabletViewState extends State<KnockoutTabletView> {
-  final double matchWidth = 220.0;
-  final double roundWidth = 280.0;
+  // 단체전일 경우 넓이를 30% 크게 설정
+  double get matchWidth => _isTeamMatch ? 220.0 * 1.3 : 220.0;
+  // 단체전일 경우 라운드 간 간격도 30% 증가하여 연결선 위치 맞춤
+  double get roundWidth => _isTeamMatch ? 280.0 * 1.3 : 280.0;
   
-  // 판넬 높이를 110으로 상향하여 오버플로 방지 및 가독성 확보
-  double get matchHeight => _isTeamMatch ? 180.0 : 110.0;
-  double get itemHeight => _isTeamMatch ? 250.0 : 170.0;
+  // 단체전일 경우 박스 크기를 크게 설정
+  double get matchHeight => _isTeamMatch ? 240.0 : 110.0;
+  double get itemHeight => _isTeamMatch ? 320.0 : 170.0;
 
   final Set<String> _selectedMatchIds = {};
   // 대진표 뷰: 휠 = 세로 스크롤, Ctrl+휠 = 확대/축소
@@ -713,9 +715,13 @@ class _KnockoutTabletViewState extends State<KnockoutTabletView> {
     if (names.isEmpty) return "";
     List<String> list = names.split(',').map((s) => s.trim()).toList();
     List<String> lines = [];
-    for (int i = 0; i < list.length; i += 2) {
-      if (i + 1 < list.length) lines.add("${list[i]}, ${list[i+1]}");
-      else lines.add(list[i]);
+    // 한 줄에 2명씩, 최대 3줄까지 표시 (최대 6명)
+    for (int i = 0; i < list.length && i < 6; i += 2) {
+      if (i + 1 < list.length) {
+        lines.add("${list[i]}, ${list[i+1]}");
+      } else {
+        lines.add(list[i]);
+      }
     }
     return lines.join('\n');
   }
@@ -724,7 +730,7 @@ class _KnockoutTabletViewState extends State<KnockoutTabletView> {
     if (_isTeamMatch) {
       return Expanded(
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           color: isW ? const Color(0xFF1A535C).withOpacity(0.1) : Colors.transparent,
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -734,8 +740,62 @@ class _KnockoutTabletViewState extends State<KnockoutTabletView> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(p?.affiliation ?? (p == null ? 'BYE' : 'TBD'), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isW ? const Color(0xFF1A535C) : Colors.black), overflow: TextOverflow.ellipsis),
-                    if (p != null) Text(_formatTeamMembers(p.name), style: TextStyle(fontSize: 13, color: isW ? const Color(0xFF1A535C) : Colors.black87, height: 1.25, fontWeight: FontWeight.w600), maxLines: 3, overflow: TextOverflow.ellipsis),
+                    // 클럽명 표시
+                    Text(
+                      p?.affiliation ?? (p == null ? 'BYE' : 'TBD'), 
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold, 
+                        fontSize: 18, 
+                        color: isW ? const Color(0xFF1A535C) : Colors.black
+                      ), 
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
+                    const SizedBox(height: 6),
+                    // 선수명 표시 (한 줄에 2명씩, 최대 3줄)
+                    if (p != null) 
+                      ...List.generate(
+                        (p.name.split(',').length / 2).ceil().clamp(0, 3),
+                        (rowIndex) {
+                          final startIdx = rowIndex * 2;
+                          final endIdx = (startIdx + 2 < p.name.split(',').length) ? startIdx + 2 : p.name.split(',').length;
+                          final teamMembers = p.name.split(',').map((s) => s.trim()).toList();
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 2),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    teamMembers[startIdx],
+                                    style: TextStyle(
+                                      fontSize: 12, 
+                                      color: isW ? const Color(0xFF1A535C) : Colors.black87, 
+                                      fontWeight: FontWeight.w600
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                if (endIdx > startIdx + 1) ...[
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      teamMembers[startIdx + 1],
+                                      style: TextStyle(
+                                        fontSize: 12, 
+                                        color: isW ? const Color(0xFF1A535C) : Colors.black87, 
+                                        fontWeight: FontWeight.w600
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          );
+                        },
+                      ),
                   ],
                 ),
               ),

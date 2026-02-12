@@ -93,7 +93,17 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
   Widget build(BuildContext context) {
     final groups = _currentEvent.groups ?? [];
     final bool isSkipMode = _currentEvent.settings.skipGroupStage;
-    bool canProceed = isSkipMode || (groups.isNotEmpty && groups.every((g) => g.matches.every((m) => m.status == MatchStatus.completed || m.status == MatchStatus.withdrawal)));
+    // 예선전 없음 모드이거나, 예선전이 있고 모든 경기가 종료되었을 때만 활성화
+    bool canProceed = false;
+    if (isSkipMode) {
+      // 예선전 없음 모드: 바로 활성화
+      canProceed = true;
+    } else {
+      // 예선전 모드: 조가 있고 모든 경기가 종료되었을 때만 활성화
+      canProceed = groups.isNotEmpty && 
+                   groups.every((g) => g.matches.isNotEmpty && 
+                   g.matches.every((m) => m.status == MatchStatus.completed || m.status == MatchStatus.withdrawal));
+    }
     bool hasWaiting = _waitingPlayers.isNotEmpty;
 
     return PopScope(
@@ -122,8 +132,15 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
               child: const Text('본선토너먼트', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
             ),
             const VerticalDivider(color: Colors.white24, indent: 15, endIndent: 15),
-            // 본선 토너먼트가 시작되면 조 추가 비활성화
-            _appBarAction(Icons.group_add_outlined, '조 추가', Colors.cyanAccent, (_currentEvent.knockoutRounds != null && _currentEvent.knockoutRounds!.isNotEmpty) ? null : _addNewGroup),
+            // 본선 토너먼트가 시작되지 않았을 때만 조 추가 가능
+            _appBarAction(
+              Icons.group_add_outlined, 
+              '조 추가', 
+              Colors.cyanAccent, 
+              (_currentEvent.knockoutRounds == null || _currentEvent.knockoutRounds!.isEmpty) 
+                ? _addNewGroup 
+                : null
+            ),
             const VerticalDivider(color: Colors.white24, indent: 15, endIndent: 15),
             if (!isSkipMode) IconButton(icon: const Icon(Icons.casino_outlined, color: Colors.orangeAccent), onPressed: hasWaiting ? null : _fillRandomScores, tooltip: '테스트 점수 입력'),
             _appBarAction(Icons.assignment_outlined, '기록지 출력', Colors.amber, hasWaiting ? null : () {
@@ -177,7 +194,10 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
                                         groups.length,
                                         (index) => SizedBox(
                                           key: _groupCardKeys[index],
-                                          width: (MediaQuery.of(context).size.width - 140) / 4,
+                                          // 단체전일 경우 넓이를 30% 넓게 하고 한 줄에 3개 조만 표시
+                                          width: _isTeamMatch 
+                                            ? ((MediaQuery.of(context).size.width - 140) / 3) * 1.3
+                                            : (MediaQuery.of(context).size.width - 140) / 4,
                                           child: _buildGroupCard(groups[index], index),
                                         ),
                                       ),
