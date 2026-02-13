@@ -2,9 +2,11 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:file_picker/file_picker.dart';
 import 'main.dart';
 import 'models.dart';
 import 'file_utils.dart';
+import 'database_service.dart';
 
 class ProgramSettingsPage extends StatefulWidget {
   final List<TournamentEvent> events;
@@ -41,6 +43,7 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
   final Map<String, bool> _eventCheckState = {};
   List<Map<String, dynamic>> _savedTournaments = [];
   String? _currentFile;
+  final TextEditingController _dataPathController = TextEditingController();
 
   static const Map<String, String?> _fontOptions = {
     '시스템 기본': null,
@@ -66,6 +69,7 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
     for (var e in widget.events) {
       _eventCheckState[e.id] = !unchecked.contains(e.id);
     }
+    _dataPathController.text = FileUtils.currentBaseDir;
     _refreshSavedList();
   }
 
@@ -112,6 +116,7 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
     _headerFontController.dispose();
     _bodyFontController.dispose();
     _systemPasswordController.dispose();
+    _dataPathController.dispose();
     super.dispose();
   }
 
@@ -337,6 +342,10 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
                 const Row(children: [Icon(Icons.settings, color: Color(0xFF1A535C), size: 26), SizedBox(width: 10), Text('프로그램 설정', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold))]),
                 ElevatedButton.icon(
                   onPressed: () async {
+                    // 관리자 비밀번호 확인
+                    final isAuthorized = await _checkAdminPassword();
+                    if (!isAuthorized) return;
+
                     final newSettings = FontSettings(titleFont: _tmpTitleFont, headerFont: _tmpHeaderFont, bodyFont: _tmpBodyFont);
                     appFontNotifier.value = newSettings;
                     await saveFontSettings(newSettings);
@@ -380,7 +389,33 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
                           children: [
                             Expanded(child: TextField(controller: _systemPasswordController, obscureText: true, decoration: const InputDecoration(hintText: '비밀번호 입력', border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10), isDense: true), style: const TextStyle(fontSize: 13))),
                             const SizedBox(width: 10),
-                            ElevatedButton(onPressed: () async { final pwd = _systemPasswordController.text; await saveSystemAdminPassword(pwd); if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(pwd.isEmpty ? '비밀번호가 해제되었습니다.' : '시스템관리 비밀번호가 저장되었습니다.'), duration: const Duration(seconds: 1))); }, style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1A535C), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12)), child: const Text('저장', style: TextStyle(fontWeight: FontWeight.bold))),
+                            ElevatedButton(
+                              onPressed: () async {
+                                // 관리자 비밀번호 확인 (기존 비밀번호가 있는 경우)
+                                final savedPassword = await FileUtils.getAdminPassword();
+                                if (savedPassword.isNotEmpty && savedPassword != '1234') {
+                                  final isAuthorized = await _checkAdminPassword();
+                                  if (!isAuthorized) return;
+                                }
+
+                                final pwd = _systemPasswordController.text;
+                                await saveSystemAdminPassword(pwd);
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(pwd.isEmpty ? '비밀번호가 해제되었습니다.' : '시스템관리 비밀번호가 저장되었습니다.'),
+                                      duration: const Duration(seconds: 1),
+                                    ),
+                                  );
+                                }
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF1A535C),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                              ),
+                              child: const Text('저장', style: TextStyle(fontWeight: FontWeight.bold)),
+                            ),
                           ],
                         ),
                         const SizedBox(height: 16), _buildSettingInfoRow('프로그램 버전', 'v1.5.0'),
@@ -389,7 +424,301 @@ class _ProgramSettingsPageState extends State<ProgramSettingsPage> {
                     ),
                   ),
                 ),
-                const VerticalDivider(width: 1), Expanded(flex: 1, child: Container(color: Colors.white)), const VerticalDivider(width: 1), Expanded(flex: 1, child: Container(color: Colors.white)),
+                const VerticalDivider(width: 1),
+                Expanded(
+                  flex: 1,
+                  child: Container(color: Colors.white),
+                ),
+                const VerticalDivider(width: 1),
+                Expanded(
+                  flex: 1,
+                  child: _buildPathSettingsPanel(),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 관리자 비밀번호 확인 다이얼로그
+  Future<bool> _checkAdminPassword() async {
+    final savedPassword = await FileUtils.getAdminPassword();
+    
+    // 비밀번호가 설정되지 않은 경우 바로 통과
+    if (savedPassword.isEmpty || savedPassword == '1234') {
+      return true;
+    }
+
+    final pwController = TextEditingController();
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('시스템 관리자 비밀번호 확인'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              '이 작업을 수행하려면 시스템 관리자 비밀번호를 입력하세요.',
+              style: TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: pwController,
+              obscureText: true,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: '시스템 관리자 비밀번호',
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (_) {
+                if (pwController.text == savedPassword) {
+                  Navigator.pop(ctx, true);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('비밀번호가 틀렸습니다.'),
+                      backgroundColor: Colors.redAccent,
+                    ),
+                  );
+                }
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('취소'),
+          ),
+          TextButton(
+            onPressed: () {
+              if (pwController.text == savedPassword) {
+                Navigator.pop(ctx, true);
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('비밀번호가 틀렸습니다.'),
+                    backgroundColor: Colors.redAccent,
+                  ),
+                );
+              }
+            },
+            child: const Text('확인'),
+          ),
+        ],
+      ),
+    );
+
+    return result ?? false;
+  }
+
+  // 데이터 저장 경로 설정 패널
+  Widget _buildPathSettingsPanel() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.folder_outlined, color: Color(0xFF1A535C), size: 20),
+              SizedBox(width: 8),
+              Text(
+                '데이터 저장 경로',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blueGrey,
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '대회 데이터가 저장되는 기본 경로를 설정합니다.',
+            style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              border: Border.all(color: Colors.grey.shade300),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _dataPathController,
+                        decoration: InputDecoration(
+                          hintText: '경로를 입력하거나 선택하세요',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          isDense: true,
+                          filled: true,
+                          fillColor: Colors.white,
+                        ),
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      onPressed: () async {
+                        try {
+                          String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
+                          if (selectedDirectory != null && selectedDirectory.isNotEmpty) {
+                            setState(() {
+                              _dataPathController.text = selectedDirectory;
+                            });
+                          }
+                        } catch (e) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('경로 선택 중 오류가 발생했습니다: $e'),
+                                backgroundColor: Colors.redAccent,
+                                duration: const Duration(seconds: 2),
+                              ),
+                            );
+                          }
+                        }
+                      },
+                      icon: const Icon(Icons.folder_open, size: 16),
+                      label: const Text('폴더 선택', style: TextStyle(fontSize: 12)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF1A535C),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () {
+                        setState(() {
+                          _dataPathController.text = FileUtils.currentBaseDir;
+                        });
+                      },
+                      child: const Text('초기화', style: TextStyle(fontSize: 12)),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      onPressed: () async {
+                        // 관리자 비밀번호 확인
+                        final isAuthorized = await _checkAdminPassword();
+                        if (!isAuthorized) return;
+
+                        final newPath = _dataPathController.text.trim();
+                        if (newPath.isEmpty) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('경로를 입력하세요.'),
+                                backgroundColor: Colors.orange,
+                                duration: Duration(seconds: 1),
+                              ),
+                            );
+                          }
+                          return;
+                        }
+
+                        // 경로 유효성 검사
+                        try {
+                          final dir = Directory(newPath);
+                          if (!await dir.exists()) {
+                            // 디렉토리가 없으면 생성 시도
+                            await dir.create(recursive: true);
+                          }
+
+                          // 경로 저장
+                          await FileUtils.setBaseDir(newPath);
+                          
+                          // DB 재연결 (새 경로의 DB 사용)
+                          try {
+                            final dbService = DatabaseService();
+                            await dbService.reconnectDatabase();
+                          } catch (e) {
+                            debugPrint('DB 재연결 오류: $e');
+                          }
+                          
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('데이터 저장 경로가 변경되었습니다.\n새 경로: $newPath\n\n※ 프로그램을 재시작하면 모든 기능이 새 경로에서 동작합니다.'),
+                                duration: const Duration(seconds: 3),
+                                backgroundColor: Colors.green,
+                              ),
+                            );
+                          }
+                        } catch (e) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('경로 설정 중 오류가 발생했습니다: $e'),
+                                backgroundColor: Colors.redAccent,
+                                duration: const Duration(seconds: 2),
+                              ),
+                            );
+                          }
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF1A535C),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                      ),
+                      child: const Text(
+                        '경로 저장',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.blue.shade50,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: Colors.blue.shade200),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.info_outline, size: 16, color: Colors.blue),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '현재 경로: ${FileUtils.currentBaseDir}\n\n※ 경로 변경 후 프로그램을 재시작하면 새 경로가 적용됩니다.',
+                    style: TextStyle(fontSize: 11, color: Colors.blue.shade900),
+                  ),
+                ),
               ],
             ),
           ),

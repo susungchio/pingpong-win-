@@ -1,8 +1,9 @@
 import 'dart:io';
 import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'package:path/path.dart';
+import 'package:path/path.dart' as p;
 import 'models.dart';
+import 'file_utils.dart';
 
 class DatabaseService {
   static final DatabaseService _instance = DatabaseService._internal();
@@ -17,10 +18,27 @@ class DatabaseService {
     return _database!;
   }
 
+  // 경로 변경 시 DB 연결을 닫고 재연결하기 위한 메서드
+  Future<void> closeDatabase() async {
+    if (_database != null) {
+      await _database!.close();
+      _database = null;
+    }
+  }
+
+  // DB 재연결 (경로 변경 후 사용)
+  Future<void> reconnectDatabase() async {
+    await closeDatabase();
+    _database = await _initDatabase();
+  }
+
   static const String _tableMasterPlayers = 'master_players';
   static const int _dbVersion = 3;
 
   Future<Database> _initDatabase() async {
+    // FileUtils에서 설정된 동적 경로의 data 폴더를 사용합니다.
+    final dataDirPath = await FileUtils.getDataDirPath();
+    final path = p.join(dataDirPath, 'pingpong_master_v2.db');
 
     return await openDatabase(
       path,

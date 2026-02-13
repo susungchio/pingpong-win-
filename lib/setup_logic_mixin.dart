@@ -9,6 +9,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
 import 'models.dart';
 import 'database_service.dart';
+import 'file_utils.dart';
 
 mixin SetupLogicMixin<T extends StatefulWidget> on State<T> {
   final uuid = const Uuid();
@@ -22,25 +23,15 @@ mixin SetupLogicMixin<T extends StatefulWidget> on State<T> {
 
   final dbService = DatabaseService();
 
-  TournamentEvent? get currentEvent => events.isNotEmpty ? events[selectedEventIdx] : null;
+  TournamentEvent? get currentEvent => events.isNotEmpty && selectedEventIdx < events.length ? events[selectedEventIdx] : null;
 
   Future<void> initSetupData() async {
     await loadPresets();
   }
 
-  // --- 경로 관리 유틸리티 ---
-  Future<String> _getDataDirPath() async {
-    final exePath = File(Platform.resolvedExecutable).parent.path;
-    final dataDir = Directory(p.join(exePath, 'data'));
-    if (!await dataDir.exists()) {
-      await dataDir.create(recursive: true);
-    }
-    return dataDir.path;
-  }
-
   // --- 중복 데이터 파일 관리 ---
   Future<File> _getDuplicationFile() async {
-    final dataPath = await _getDataDirPath();
+    final dataPath = await FileUtils.getDataDirPath();
     return File(p.join(dataPath, 'duplication.json'));
   }
 
@@ -75,6 +66,7 @@ mixin SetupLogicMixin<T extends StatefulWidget> on State<T> {
     if (await file.exists()) await file.delete();
   }
 
+  // --- 대량 데이터 등록 ---
   Future<Map<String, int>> importRawPlayerData(String rawText) async {
     List<MasterPlayer> playersToProcess = _parseBulkPlayerRecords(rawText);
     if (playersToProcess.isEmpty) return {'added': 0, 'updated': 0, 'duplicates': 0};
@@ -139,9 +131,7 @@ mixin SetupLogicMixin<T extends StatefulWidget> on State<T> {
     if (tokens.length < 5) return null;
     if (!pointsRegex.hasMatch(tokens.last)) return null;
     try {
-      final pNum = tokens[0];
-      final city = tokens[1];
-      final points = tokens.last;
+      final pNum = tokens[0]; final city = tokens[1]; final points = tokens.last;
       int genderIdx = -1;
       for (int j = 2; j < tokens.length; j++) { if (tokens[j] == '남' || tokens[j] == '여') { genderIdx = j; break; } }
       if (genderIdx < 0) return null;
@@ -157,7 +147,7 @@ mixin SetupLogicMixin<T extends StatefulWidget> on State<T> {
   // --- 프리셋 관리 ---
   Future<void> loadPresets() async {
     try {
-      final dataPath = await _getDataDirPath();
+      final dataPath = await FileUtils.getDataDirPath();
       final file = File(p.join(dataPath, 'presets_v2.json'));
       if (await file.exists()) {
         final data = jsonDecode(await file.readAsString());
@@ -177,13 +167,11 @@ mixin SetupLogicMixin<T extends StatefulWidget> on State<T> {
 
   Future<void> savePresets() async {
     try {
-      final dataPath = await _getDataDirPath();
+      final dataPath = await FileUtils.getDataDirPath();
       final file = File(p.join(dataPath, 'presets_v2.json'));
       await file.writeAsString(jsonEncode({'left': presetsLeft, 'right': presetsRight}));
     } catch (e) { debugPrint('Save presets error: $e'); }
   }
-
-  List<String> get checkedEventIdsForSave => [];
 
   Future<void> saveData() async {
     if (currentFileName == null) return;
@@ -194,11 +182,8 @@ mixin SetupLogicMixin<T extends StatefulWidget> on State<T> {
         'lastUpdated': DateTime.now().toIso8601String(),
       };
       final jsonString = jsonEncode(data);
-      final dataPath = await _getDataDirPath();
-      // 파일명이 절대 경로가 아닐 경우 data 폴더 내에 저장하도록 처리
-      final filePath = p.isAbsolute(currentFileName!)
-          ? currentFileName!
-          : p.join(dataPath, currentFileName);
+      final dataPath = await FileUtils.getDataDirPath();
+      final filePath = p.isAbsolute(currentFileName!) ? currentFileName! : p.join(dataPath, currentFileName);
       final file = File(filePath);
       await file.writeAsString(jsonString, flush: true);
     } catch (e) { debugPrint('Save error: $e'); }
@@ -215,12 +200,10 @@ mixin SetupLogicMixin<T extends StatefulWidget> on State<T> {
     };
   }
 
-  Map<String, dynamic> _matchToMap(Match m) {
-    return {
-      'id': m.id, 'p1Id': m.player1?.id, 'p2Id': m.player2?.id, 's1': m.score1, 's2': m.score2,
-      'status': m.status.index, 'winnerId': m.winner?.id, 'nextMatchId': m.nextMatchId, 'nextMatchSlot': m.nextMatchSlot,
-    };
-  }
+  Map<String, dynamic> _matchToMap(Match m) => {
+    'id': m.id, 'p1Id': m.player1?.id, 'p2Id': m.player2?.id, 's1': m.score1, 's2': m.score2,
+    'status': m.status.index, 'winnerId': m.winner?.id, 'nextMatchId': m.nextMatchId, 'nextMatchSlot': m.nextMatchSlot,
+  };
 
   void afterLoadFromFile(Map<String, dynamic> data) {}
 
@@ -230,7 +213,6 @@ mixin SetupLogicMixin<T extends StatefulWidget> on State<T> {
       final data = jsonDecode(contents);
       setState(() {
         titleController.text = data['title'] ?? '';
-        // 로드한 파일의 전체 경로를 유지하여 이후 저장 시 같은 위치에 저장되도록 함
         currentFileName = file.path;
         events.clear();
         if (data['events'] != null) { for (var eJson in data['events']) { events.add(_eventFromMap(eJson)); } }
@@ -250,122 +232,194 @@ mixin SetupLogicMixin<T extends StatefulWidget> on State<T> {
     return event;
   }
 
-  Match _matchFromMap(Map<String, dynamic> m, Player? Function(String?) findP) {
-    return Match(id: m['id'], player1: findP(m['p1Id']), player2: findP(m['p2Id']), score1: m['s1'], score2: m['s2'], status: MatchStatus.values[m['status']], winner: findP(m['winnerId']), nextMatchId: m['nextMatchId'], nextMatchSlot: m['nextMatchSlot']);
-  }
+  Match _matchFromMap(Map<String, dynamic> m, Player? Function(String?) findP) => Match(id: m['id'], player1: findP(m['p1Id']), player2: findP(m['p2Id']), score1: m['s1'], score2: m['s2'], status: MatchStatus.values[m['status']], winner: findP(m['winnerId']), nextMatchId: m['nextMatchId'], nextMatchSlot: m['nextMatchSlot']);
 
   void showAddEventDialog(BuildContext context) {
     final eventNameController = TextEditingController();
     int selectedTeamSize = 1;
-    bool addToLeft = false;
-    bool addToRight = false;
-
+    bool addToLeft = false; bool addToRight = false;
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
-          void handleAddAction(String name, int teamSize) {
-            if (name.isEmpty) return;
+          // 리스트 등록만 처리하는 함수
+          void handleListRegistration(String name) {
+            if (name.isEmpty) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('종목 이름을 입력해주세요.')));
+              return;
+            }
             String trimmedName = name.trim();
-            if (addToLeft || addToRight) {
-              setDialogState(() {
-                if (addToLeft && !presetsLeft.contains(trimmedName)) presetsLeft.add(trimmedName);
-                if (addToRight && !presetsRight.contains(trimmedName)) presetsRight.add(trimmedName);
-              });
-              savePresets();
-              eventNameController.clear();
-              setDialogState(() { addToLeft = false; addToRight = false; });
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('자주 쓰는 종목 리스트에 등록되었습니다.'), duration: Duration(seconds: 1)));
+            if (!addToLeft && !addToRight) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('리스트 등록 그룹을 선택해주세요.')));
               return;
             }
-            if (events.any((e) => e.name.trim() == trimmedName)) {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('같은 이름의 종목이 이미 존재합니다.'), duration: Duration(seconds: 2)));
-              return;
-            }
-            setState(() { events.add(TournamentEvent(id: uuid.v4(), name: trimmedName, teamSize: teamSize)); selectedEventIdx = events.length - 1; });
-            saveData();
-            Navigator.pop(context);
+            setDialogState(() {
+              if (addToLeft && !presetsLeft.contains(trimmedName)) presetsLeft.add(trimmedName);
+              if (addToRight && !presetsRight.contains(trimmedName)) presetsRight.add(trimmedName);
+            });
+            savePresets();
+            eventNameController.clear();
+            setDialogState(() { addToLeft = false; addToRight = false; });
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('자주 쓰는 종목 리스트에 등록되었습니다.')));
           }
 
           Widget buildPresetList(List<String> list, bool isLeft) {
             return Container(
-              decoration: BoxDecoration(color: Colors.white, border: Border.all(color: Colors.grey.shade200), borderRadius: BorderRadius.circular(8)),
-              child: SingleChildScrollView(
-                child: Column(
-                  children: [
-                    for (int idx = 0; idx < list.length; idx++) ...[
-                      ListTile(
-                        dense: true,
-                        title: Text(list[idx], style: const TextStyle(fontSize: 14)),
-                        trailing: IconButton(icon: const Icon(Icons.remove_circle_outline, size: 16, color: Colors.redAccent), onPressed: () { setDialogState(() => list.removeAt(idx)); savePresets(); }),
-                        onTap: () {
-                          if (events.any((e) => e.name.trim() == list[idx].trim())) {
-                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('같은 이름의 종목이 이미 존재합니다.'), duration: Duration(seconds: 2)));
-                            return;
-                          }
-                          setState(() { events.add(TournamentEvent(id: uuid.v4(), name: list[idx], teamSize: selectedTeamSize)); selectedEventIdx = events.length - 1; });
-                          saveData();
-                          Navigator.pop(context);
-                        },
-                        hoverColor: isLeft ? Colors.blue.withOpacity(0.05) : Colors.green.withOpacity(0.05),
-                      ),
-                      if (idx < list.length - 1) const Divider(height: 1),
-                    ],
-                  ],
+              height: 300, decoration: BoxDecoration(color: Colors.white, border: Border.all(color: Colors.grey.shade200), borderRadius: BorderRadius.circular(8)),
+              child: ListView.separated(
+                itemCount: list.length, separatorBuilder: (ctx, i) => const Divider(height: 1),
+                itemBuilder: (ctx, idx) => ListTile(
+                  dense: true, title: Text(list[idx]),
+                  trailing: IconButton(icon: const Icon(Icons.remove_circle_outline, size: 16), onPressed: () { setDialogState(() => list.removeAt(idx)); savePresets(); }),
+                  onTap: () {
+                    if (events.any((e) => e.name.trim() == list[idx].trim())) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('같은 이름의 종목이 이미 존재합니다.'))); return; }
+                    setState(() { events.add(TournamentEvent(id: uuid.v4(), name: list[idx], teamSize: selectedTeamSize)); selectedEventIdx = events.length - 1; });
+                    saveData(); Navigator.pop(context);
+                  },
                 ),
               ),
             );
           }
 
           return Dialog(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1000, maxHeight: 800),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: SizedBox(
+              width: 600,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // 상단바 - #1a535c 색상
                   Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: const BoxDecoration(color: Color(0xFF1A535C), borderRadius: BorderRadius.only(topLeft: Radius.circular(12), topRight: Radius.circular(12))),
-                    child: const Row(children: [Icon(Icons.settings_suggest, color: Colors.white), SizedBox(width: 12), Text('종목 추가 및 관리', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold))]),
-                  ),
-                  Flexible(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('종목 직접 입력 및 추가', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1A535C))),
-                          const SizedBox(height: 16),
-                          LayoutBuilder(builder: (context, constraints) {
-                            return Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(flex: 3, child: Column(children: [TextField(controller: eventNameController, decoration: const InputDecoration(labelText: '종목 이름 입력', border: OutlineInputBorder(), hintText: '예: 남자 60대부'), onSubmitted: (v) => handleAddAction(v, selectedTeamSize)), const SizedBox(height: 8), Row(children: [const Text('자주 쓰는 종목에 추가:', style: TextStyle(fontSize: 13, color: Colors.grey)), const SizedBox(width: 12), FilterChip(label: const Text('왼쪽 그룹'), selected: addToLeft, onSelected: (v) => setDialogState(() => addToLeft = v), selectedColor: Colors.blue.shade100), const SizedBox(width: 8), FilterChip(label: const Text('오른쪽 그룹'), selected: addToRight, onSelected: (v) => setDialogState(() => addToRight = v), selectedColor: Colors.green.shade100)])])),
-                                const SizedBox(width: 16),
-                                Expanded(flex: 2, child: DropdownButtonFormField<int>(value: selectedTeamSize, decoration: const InputDecoration(labelText: '인원 구성', border: OutlineInputBorder()), items: [1, 2, 3, 4, 5].map((n) => DropdownMenuItem(value: n, child: Text(n == 1 ? '개인전' : '$n인 단체/복식'))).toList(), onChanged: (v) => setDialogState(() => selectedTeamSize = v!))),
-                                const SizedBox(width: 16),
-                                Expanded(child: ElevatedButton(onPressed: () => handleAddAction(eventNameController.text, selectedTeamSize), style: ElevatedButton.styleFrom(backgroundColor: (addToLeft || addToRight) ? Colors.blueGrey : const Color(0xFF1A535C), foregroundColor: Colors.white, minimumSize: const Size(0, 55)), child: Text((addToLeft || addToRight) ? '리스트 등록' : '종목 추가', style: const TextStyle(fontWeight: FontWeight.bold)))),
-                              ],
-                            );
-                          }),
-                          const SizedBox(height: 12),
-                          if (addToLeft || addToRight) const Text('※ 그룹 체크 시 리스트에만 등록되며 대회에는 추가되지 않습니다.', style: TextStyle(fontSize: 12, color: Colors.redAccent, fontWeight: FontWeight.w500)),
-                          const SizedBox(height: 40),
-                          const Text('자주 쓰는 종목 선택 (클릭 시 즉시 추가)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1A535C))),
-                          const SizedBox(height: 16),
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Padding(padding: EdgeInsets.only(bottom: 8), child: Text('◀ 왼쪽 그룹', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold))), SizedBox(height: 400, child: buildPresetList(presetsLeft, true))])),
-                              const SizedBox(width: 24),
-                              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Padding(padding: EdgeInsets.only(bottom: 8), child: Text('오른쪽 그룹 ▶', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold))), SizedBox(height: 400, child: buildPresetList(presetsRight, false))])),
-                            ],
-                          ),
-                        ],
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF1a535c),
+                      borderRadius: BorderRadius.only(
+                        topLeft: Radius.circular(12),
+                        topRight: Radius.circular(12),
                       ),
                     ),
+                    padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          '종목 추가 및 관리',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                      ],
+                    ),
                   ),
-                  Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(12), bottomRight: Radius.circular(12))), child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('닫기'))])),
+                  // 내용 영역
+                  Flexible(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(24.0),
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        TextField(
+                          controller: eventNameController,
+                          decoration: const InputDecoration(
+                            labelText: '종목 이름 직접 입력',
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            const Text('리스트 등록:', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                            const SizedBox(width: 8),
+                            Checkbox(
+                              value: addToLeft,
+                              onChanged: (v) => setDialogState(() => addToLeft = v!),
+                            ),
+                            const Text('좌'),
+                            const SizedBox(width: 16),
+                            Checkbox(
+                              value: addToRight,
+                              onChanged: (v) => setDialogState(() => addToRight = v!),
+                            ),
+                            const Text('우'),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        DropdownButtonFormField<int>(
+                          value: selectedTeamSize,
+                          decoration: const InputDecoration(
+                            labelText: '인원 구성',
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                          ),
+                          items: [1, 2, 3, 4, 5].map((n) => DropdownMenuItem(
+                            value: n,
+                            child: Text(n == 1 ? '개인전' : '$n인 단체/복식'),
+                          )).toList(),
+                          onChanged: (v) => setDialogState(() => selectedTeamSize = v!),
+                        ),
+                        const SizedBox(height: 24),
+                        ElevatedButton(
+                          onPressed: () => handleListRegistration(eventNameController.text),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF1a535c),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          child: const Text('리스트 등록', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        ),
+                        const Divider(height: 40),
+                        const Text(
+                          '자주 쓰는 종목 (클릭 시 추가)',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Expanded(child: Column(children: [
+                            const Text('왼쪽 그룹', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                            const SizedBox(height: 8),
+                            buildPresetList(presetsLeft, true),
+                          ])),
+                          const SizedBox(width: 10),
+                          Expanded(child: Column(children: [
+                            const Text('오른쪽 그룹', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                            const SizedBox(height: 8),
+                            buildPresetList(presetsRight, false),
+                          ])),
+                        ]),
+                      ]),
+                    ),
+                  ),
+                  // 하단바 - #1a535c 색상
+                  Container(
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF1a535c),
+                      borderRadius: BorderRadius.only(
+                        bottomLeft: Radius.circular(12),
+                        bottomRight: Radius.circular(12),
+                      ),
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          ),
+                          child: const Text('닫기', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -386,7 +440,7 @@ mixin SetupLogicMixin<T extends StatefulWidget> on State<T> {
       var excel = excel_lib.Excel.decodeBytes(bytes);
       List<String> sheetNames = excel.tables.keys.toList();
       if (!mounted) return;
-      String? selectedSheet = await showDialog<String>(context: context, builder: (context) => AlertDialog(title: const Text('가져올 시트(탭) 선택', style: TextStyle(fontWeight: FontWeight.bold)), content: SizedBox(width: double.maxFinite, child: ListView.builder(shrinkWrap: true, itemCount: sheetNames.length, itemBuilder: (context, index) { return Card(child: ListTile(leading: const Icon(Icons.table_view, color: Colors.green), title: Text(sheetNames[index]), onTap: () => Navigator.pop(context, sheetNames[index]))); })), actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소'))]));
+      String? selectedSheet = await showDialog<String>(context: context, builder: (context) => AlertDialog(title: const Text('가져올 시트(탭) 선택'), content: SizedBox(width: double.maxFinite, child: ListView.builder(shrinkWrap: true, itemCount: sheetNames.length, itemBuilder: (context, index) { return Card(child: ListTile(leading: const Icon(Icons.table_view, color: Colors.green), title: Text(sheetNames[index]), onTap: () => Navigator.pop(context, sheetNames[index]))); })), actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소'))]));
       if (selectedSheet != null) {
         List<Player> newPlayers = [];
         var table = excel.tables[selectedSheet];
@@ -409,8 +463,8 @@ mixin SetupLogicMixin<T extends StatefulWidget> on State<T> {
             newPlayers.add(Player(id: uuid.v4(), name: name, affiliation: affiliation));
           }
         }
-        if (newPlayers.isNotEmpty) { setState(() { currentEvent!.players.addAll(newPlayers); currentEvent!.groups = null; }); saveData(); if (mounted) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('[$selectedSheet] 시트에서 ${newPlayers.length}개 팀/선수를 추가했습니다.'))); } }
+        if (newPlayers.isNotEmpty) { setState(() { currentEvent!.players.addAll(newPlayers); currentEvent!.groups = null; }); saveData(); if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('[$selectedSheet] 시트에서 ${newPlayers.length}개 팀/선수를 추가했습니다.'))); }
       }
-    } catch (e) { debugPrint('Excel Import Error: $e'); if (mounted) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('엑셀 파일을 읽는 중 오류가 발생했습니다.'))); } }
+    } catch (e) { debugPrint('Excel Import Error: $e'); if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('엑셀 파일을 읽는 중 오류가 발생했습니다.'))); }
   }
 }

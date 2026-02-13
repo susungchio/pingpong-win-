@@ -127,7 +127,24 @@ class _SetupMobileViewState extends State<SetupMobileView> with SetupLogicMixin 
 
   @override
   Widget build(BuildContext context) {
+    // 본선이 시작되었는지 확인
     bool isKnockoutStarted = currentEvent != null && currentEvent!.knockoutRounds != null && currentEvent!.knockoutRounds!.isNotEmpty;
+    // 예선전 게임이 모두 종료되었는지 확인
+    bool canAddPlayer = true;
+    if (currentEvent != null) {
+      final groups = currentEvent!.groups ?? [];
+      final bool isSkipMode = currentEvent!.settings.skipGroupStage;
+      bool canProceed = false;
+      if (isSkipMode) { canProceed = true; }
+      else {
+        canProceed = groups.isNotEmpty &&
+                     groups.every((g) => g.matches.isNotEmpty &&
+                     g.matches.every((m) => m.status == MatchStatus.completed || m.status == MatchStatus.withdrawal));
+      }
+      // 선수 추가 가능 여부: 본선이 시작되지 않았고, 예선전 게임이 모두 종료되지 않은 상태
+      canAddPlayer = !isKnockoutStarted && (isSkipMode || !canProceed || groups.isEmpty);
+    }
+    final bool finalCanAddPlayer = canAddPlayer;
     return Scaffold(
       appBar: AppBar(
         title: const Text('대회 설정 및 관리'),
@@ -169,7 +186,7 @@ class _SetupMobileViewState extends State<SetupMobileView> with SetupLogicMixin 
                 if (currentEvent != null) ...[
                   _buildSettingsCard(),
                   const SizedBox(height: 16),
-                  _buildPlayerInput(isKnockoutStarted),
+                  _buildPlayerInput(finalCanAddPlayer),
                 ] else
                   const Center(child: Padding(padding: EdgeInsets.all(40.0), child: Text('대회를 불러오거나 종목을 추가하세요.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)))),
               ]),
@@ -178,7 +195,7 @@ class _SetupMobileViewState extends State<SetupMobileView> with SetupLogicMixin 
           if (currentEvent != null)
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              sliver: SliverList(delegate: SliverChildBuilderDelegate((context, index) => _buildPlayerTile(currentEvent!.players[index], index, isKnockoutStarted), childCount: currentEvent!.players.length)),
+              sliver: SliverList(delegate: SliverChildBuilderDelegate((context, index) => _buildPlayerTile(currentEvent!.players[index], index, finalCanAddPlayer), childCount: currentEvent!.players.length)),
             ),
           const SliverToBoxAdapter(child: SizedBox(height: 100)),
         ],
@@ -280,16 +297,16 @@ class _SetupMobileViewState extends State<SetupMobileView> with SetupLogicMixin 
   }
 
   Widget _topMenuButton(IconData icon, String label, Color color, VoidCallback onTap) => InkWell(onTap: onTap, child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(icon, color: color, size: 24), const SizedBox(height: 2), Text(label, style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.bold))]));
-  Widget _buildTitleInput() => Card(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0), child: Row(children: [Expanded(child: TextField(controller: titleController, onEditingComplete: saveData, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1A535C)), decoration: const InputDecoration(labelText: '대회 제목', border: InputBorder.none))), IconButton(icon: Icon(currentFileName == null ? Icons.save_outlined : Icons.check_circle_rounded, color: currentFileName == null ? Colors.grey : Colors.blue, size: 28), onPressed: _handleInitialSave)])));
+  Widget _buildTitleInput() => Card(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0), child: Row(children: [Expanded(child: TextField(controller: titleController, onEditingComplete: saveData, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF1A535C)), decoration: const InputDecoration(labelText: '대회 제목', border: InputBorder.none))), IconButton(icon: Icon(currentFileName == null ? Icons.save_outlined : Icons.check_circle_rounded, color: currentFileName == null ? Colors.grey : Colors.blue, size: 28), onPressed: _handleInitialSave)])));
   Widget _buildEventSelector() => SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [...events.asMap().entries.map((e) => Padding(padding: const EdgeInsets.only(right: 8.0), child: GestureDetector(onLongPress: () { _secureSettingUpdate(() { showDialog(context: context, builder: (context) => AlertDialog(title: const Text('종목 삭제'), content: Text('[${e.value.name}]을 삭제할까요?'), actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')), TextButton(onPressed: () { setState(() { events.removeAt(e.key); selectedEventIdx = 0; }); saveData(); Navigator.pop(context); }, child: const Text('삭제', style: TextStyle(color: Colors.red)))],)); }); }, child: ChoiceChip(label: Text(e.value.name), selected: selectedEventIdx == e.key, selectedColor: const Color(0xFF1A535C), labelStyle: TextStyle(color: selectedEventIdx == e.key ? Colors.white : Colors.black, fontWeight: FontWeight.bold), onSelected: (selected) { if (selected) { setState(() { selectedEventIdx = e.key; if (currentEvent != null && currentEvent!.teamSize > 1) { _updateTeamMemberControllers(currentEvent!.teamSize); } }); } },),),)), ActionChip(avatar: const Icon(Icons.add, size: 20), label: const Text('종목 추가'), onPressed: () => showAddEventDialog(context), backgroundColor: Colors.orange.shade50)]));
 
-  Widget _buildPlayerInput(bool isKnockoutStarted) {
+  Widget _buildPlayerInput(bool canAddPlayer) {
     if (currentEvent == null) return const SizedBox.shrink();
     if (currentEvent!.teamSize > 1) {
       _updateTeamMemberControllers(currentEvent!.teamSize);
       final int totalMembers = currentEvent!.teamSize + 1;
       return Card(
-        color: isKnockoutStarted ? Colors.grey.shade50 : const Color(0xFFF8F9FA),
+        color: canAddPlayer ? const Color(0xFFF8F9FA) : Colors.grey.shade50,
         child: Padding(
           padding: const EdgeInsets.all(12.0),
           child: Column(
@@ -299,12 +316,12 @@ class _SetupMobileViewState extends State<SetupMobileView> with SetupLogicMixin 
                 const Icon(Icons.group, color: Color(0xFF1A535C), size: 20),
                 const SizedBox(width: 8),
                 Text('${currentEvent!.teamSize}인 단체전 선수 등록', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1A535C))),
-                if (isKnockoutStarted) const Padding(padding: EdgeInsets.only(left: 8), child: Text('(본선 시작-추가불가)', style: TextStyle(color: Colors.red, fontSize: 11)))
+                if (!canAddPlayer) const Padding(padding: EdgeInsets.only(left: 8), child: Text('(본선 시작-추가불가)', style: TextStyle(color: Colors.red, fontSize: 11)))
               ]),
               const SizedBox(height: 12),
               TextField(
                 controller: _teamNameController,
-                enabled: !isKnockoutStarted,
+                enabled: canAddPlayer,
                 decoration: const InputDecoration(labelText: '팀명 (클럽명)', border: OutlineInputBorder(), isDense: true)
               ),
               const SizedBox(height: 12),
@@ -320,7 +337,7 @@ class _SetupMobileViewState extends State<SetupMobileView> with SetupLogicMixin 
                         Expanded(
                           child: TextField(
                             controller: i < _teamMemberControllers.length ? _teamMemberControllers[i] : null,
-                            enabled: !isKnockoutStarted && i < _teamMemberControllers.length,
+                            enabled: canAddPlayer && i < _teamMemberControllers.length,
                             decoration: InputDecoration(
                               labelText: i < currentEvent!.teamSize ? '${i + 1}번 선수' : '예비 선수',
                               border: const OutlineInputBorder(),
@@ -335,7 +352,7 @@ class _SetupMobileViewState extends State<SetupMobileView> with SetupLogicMixin 
                         ),
                         if (i < _teamMemberControllers.length &&
                             _teamMemberControllers[i].text.trim().isNotEmpty &&
-                            !isKnockoutStarted)
+                            canAddPlayer)
                           IconButton(
                             icon: const Icon(Icons.clear, size: 18, color: Colors.red),
                             onPressed: () {
@@ -353,7 +370,7 @@ class _SetupMobileViewState extends State<SetupMobileView> with SetupLogicMixin 
               ),
               const SizedBox(height: 12),
               ElevatedButton.icon(
-                onPressed: isKnockoutStarted ? null : _addTeamEntry,
+                onPressed: canAddPlayer ? _addTeamEntry : null,
                 icon: const Icon(Icons.add_task),
                 label: const Text('단체전 팀 등록하기'),
                 style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6B6B), foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 45))
@@ -371,19 +388,19 @@ class _SetupMobileViewState extends State<SetupMobileView> with SetupLogicMixin 
             Expanded(
               child: TextField(
                 controller: _nameController,
-                enabled: !isKnockoutStarted,
+                enabled: canAddPlayer,
                 decoration: const InputDecoration(hintText: '이름(부수)', border: InputBorder.none)
               )
             ),
             Expanded(
               child: TextField(
                 controller: _affController,
-                enabled: !isKnockoutStarted,
+                enabled: canAddPlayer,
                 decoration: const InputDecoration(hintText: '소속 (클럽명)', border: InputBorder.none)
               )
             ),
             IconButton.filled(
-              onPressed: isKnockoutStarted ? null : _addSinglePlayer,
+              onPressed: canAddPlayer ? _addSinglePlayer : null,
               icon: const Icon(Icons.add),
               style: IconButton.styleFrom(backgroundColor: const Color(0xFFFF6B6B))
             )
@@ -431,7 +448,46 @@ class _SetupMobileViewState extends State<SetupMobileView> with SetupLogicMixin 
     return lines.join('\n');
   }
 
-  Widget _buildPlayerTile(Player p, int index, bool isKnockoutStarted) => Card(margin: const EdgeInsets.only(bottom: 8), child: ListTile(leading: CircleAvatar(backgroundColor: const Color(0xFF4ECDC4).withOpacity(0.2), child: Text('${currentEvent!.players.length - index}', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1A535C)))), title: Text(currentEvent!.teamSize > 1 ? p.affiliation : p.name, style: const TextStyle(fontWeight: FontWeight.bold)), subtitle: Text(currentEvent!.teamSize > 1 ? _formatNames(p.name) : p.affiliation), trailing: Row(mainAxisSize: MainAxisSize.min, children: [IconButton(icon: Icon(Icons.edit_outlined, color: isKnockoutStarted ? Colors.grey : Colors.blue), onPressed: isKnockoutStarted ? null : () => _handleEditPlayer(index, p)), IconButton(icon: Icon(Icons.delete_outline, color: isKnockoutStarted ? Colors.grey : Colors.red), onPressed: isKnockoutStarted ? null : () => _secureSettingUpdate(() { currentEvent!.players.removeAt(index); saveData(); }, isPlayerAction: true))])));
+  Widget _buildPlayerTile(Player p, int index, bool canAddPlayer) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: const Color(0xFF4ECDC4).withOpacity(0.2),
+          child: Text(
+            '${currentEvent!.players.length - index}',
+            style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1A535C)),
+          ),
+        ),
+        title: Text(
+          currentEvent!.teamSize > 1 ? p.affiliation : p.name,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        subtitle: Text(currentEvent!.teamSize > 1 ? _formatNames(p.name) : p.affiliation),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: Icon(Icons.edit_outlined, color: canAddPlayer ? Colors.blue : Colors.grey),
+              onPressed: canAddPlayer ? () => _handleEditPlayer(index, p) : null,
+            ),
+            IconButton(
+              icon: Icon(Icons.delete_outline, color: canAddPlayer ? Colors.red : Colors.grey),
+              onPressed: canAddPlayer
+                  ? () => _secureSettingUpdate(
+                        () {
+                          currentEvent!.players.removeAt(index);
+                          saveData();
+                        },
+                        isPlayerAction: true,
+                      )
+                  : null,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   void _handleEditPlayer(int index, Player player) {
     final editNameController = TextEditingController(text: player.name);

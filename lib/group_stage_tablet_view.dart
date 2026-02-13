@@ -102,6 +102,9 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
                    g.matches.every((m) => m.status == MatchStatus.completed || m.status == MatchStatus.withdrawal));
     }
     bool hasWaiting = _waitingPlayers.isNotEmpty;
+    // 조추가 가능 여부: 본선이 시작되지 않았고, 예선전 게임이 모두 종료되지 않은 상태
+    final bool canAddGroup = (_currentEvent.knockoutRounds == null || _currentEvent.knockoutRounds!.isEmpty) && 
+                             (isSkipMode || !canProceed);
 
     return PopScope(
       canPop: !hasWaiting,
@@ -129,7 +132,7 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
               child: const Text('본선토너먼트', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
             ),
             const VerticalDivider(color: Colors.white24, indent: 15, endIndent: 15),
-            _appBarAction(Icons.group_add_outlined, '조 추가', Colors.cyanAccent, (_currentEvent.knockoutRounds == null || _currentEvent.knockoutRounds!.isEmpty) ? _addNewGroup : null),
+            _appBarAction(Icons.group_add_outlined, '조 추가', Colors.cyanAccent, canAddGroup ? _addNewGroup : null),
             const VerticalDivider(color: Colors.white24, indent: 15, endIndent: 15),
             if (!isSkipMode) IconButton(icon: const Icon(Icons.casino_outlined, color: Colors.orangeAccent), onPressed: hasWaiting ? null : _fillRandomScores, tooltip: '테스트 점수 입력'),
             _appBarAction(Icons.assignment_outlined, '기록지 출력', Colors.amber, hasWaiting ? null : () {
@@ -246,17 +249,258 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
   }
 
   void _showAssignToGroupDialog(Player p) {
-    showDialog(context: context, builder: (ctx) => AlertDialog(
-      title: Text('${p.name} 배정할 조 선택'),
-      content: SizedBox(width: double.maxFinite, child: Column(mainAxisSize: MainAxisSize.min, children: [
-        ConstrainedBox(constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.4), child: ListView.builder(shrinkWrap: true, itemCount: _currentEvent.groups?.length ?? 0, itemBuilder: (ctx, idx) {
-          final g = _currentEvent.groups![idx]; final canAdd = g.players.length < _currentEvent.settings.groupSize;
-          return ListTile(title: Text(g.name), subtitle: Text('${g.players.length}명 배정됨'), trailing: Icon(canAdd ? Icons.add_circle_outline : Icons.warning, color: canAdd ? Colors.green : Colors.orange), onTap: () { setState(() { g.players.add(p); _waitingPlayers.remove(p); TournamentLogic.syncGroupMatches(g, idx + 1); _refreshRankings(); }); widget.onDataChanged(); Navigator.pop(ctx); });
-        })),
-        const Divider(),
-        ListTile(leading: const Icon(Icons.add_box_outlined, color: Colors.blue), title: const Text('새로운 조 생성 및 배정', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)), onTap: () { Navigator.pop(ctx); _addNewGroup(); final lastIdx = _currentEvent.groups!.length - 1; final newGroup = _currentEvent.groups![lastIdx]; setState(() { newGroup.players.add(p); _waitingPlayers.remove(p); TournamentLogic.syncGroupMatches(newGroup, lastIdx + 1); _refreshRankings(); }); widget.onDataChanged(); }),
-      ])),
-      actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소'))],
+    // 조추가 가능 여부 계산
+    final groups = _currentEvent.groups ?? [];
+    final bool isSkipMode = _currentEvent.settings.skipGroupStage;
+    bool canProceed = false;
+    if (isSkipMode) { canProceed = true; }
+    else {
+      canProceed = groups.isNotEmpty &&
+                   groups.every((g) => g.matches.isNotEmpty &&
+                   g.matches.every((m) => m.status == MatchStatus.completed || m.status == MatchStatus.withdrawal));
+    }
+    final bool canAddGroup = (_currentEvent.knockoutRounds == null || _currentEvent.knockoutRounds!.isEmpty) && 
+                             (isSkipMode || !canProceed);
+
+    // 단체전인 경우 팀명, 개인전인 경우 선수명 표시
+    final String displayName = _isTeamMatch ? p.affiliation : p.name;
+
+    showDialog(context: context, builder: (ctx) => Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: SizedBox(
+        width: 1000,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 상단바 - #1a535c 색상
+            Container(
+              decoration: const BoxDecoration(
+                color: Color(0xFF1a535c),
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(12),
+                  topRight: Radius.circular(12),
+                ),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    '$displayName 배정할 조 선택',
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+            ),
+            // 내용 영역
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // 기존 조 목록
+                    if (groups.isNotEmpty) ...[
+                      ConstrainedBox(
+                        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.4),
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: groups.length,
+                          itemBuilder: (ctx, idx) {
+                            final g = groups[idx];
+                            final canAdd = g.players.length < _currentEvent.settings.groupSize;
+                            return Card(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              elevation: 2,
+                              child: ListTile(
+                                title: Text(
+                                  g.name,
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                ),
+                                subtitle: Text(
+                                  '${g.players.length}명 배정됨',
+                                  style: TextStyle(color: Colors.grey.shade600),
+                                ),
+                                trailing: Icon(
+                                  canAdd ? Icons.add_circle_outline : Icons.warning,
+                                  color: canAdd ? Colors.green : Colors.orange,
+                                  size: 28,
+                                ),
+                                onTap: () async {
+                                  // 조별 인원 초과 체크
+                                  final currentCount = g.players.length;
+                                  final maxSize = _currentEvent.settings.groupSize;
+                                  
+                                  if (currentCount >= maxSize) {
+                                    // 조별 인원 초과 시 관리자 비밀번호 확인
+                                    final savedPassword = await FileUtils.getAdminPassword();
+                                    final controller = TextEditingController();
+                                    
+                                    final shouldProceed = await showDialog<bool>(
+                                      context: ctx,
+                                      barrierDismissible: false,
+                                      builder: (dialogCtx) => AlertDialog(
+                                        title: const Text('조별 인원 초과'),
+                                        content: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            const Text(
+                                              '조별인원을 초과 하였습니다. 관리자권한으로 추가합니까?',
+                                              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                                            ),
+                                            const SizedBox(height: 16),
+                                            TextField(
+                                              controller: controller,
+                                              obscureText: true,
+                                              autofocus: true,
+                                              decoration: const InputDecoration(
+                                                labelText: '관리자 비밀번호',
+                                                border: OutlineInputBorder(),
+                                                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                              ),
+                                              onSubmitted: (_) {
+                                                if (controller.text == savedPassword || savedPassword.isEmpty || savedPassword == '1234') {
+                                                  Navigator.pop(dialogCtx, true);
+                                                } else {
+                                                  ScaffoldMessenger.of(context).showSnackBar(
+                                                    const SnackBar(
+                                                      content: Text('비밀번호가 일치하지 않습니다.'),
+                                                      backgroundColor: Colors.redAccent,
+                                                    ),
+                                                  );
+                                                }
+                                              },
+                                            ),
+                                          ],
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () => Navigator.pop(dialogCtx, false),
+                                            child: const Text('취소'),
+                                          ),
+                                          TextButton(
+                                            onPressed: () {
+                                              if (controller.text == savedPassword || savedPassword.isEmpty || savedPassword == '1234') {
+                                                Navigator.pop(dialogCtx, true);
+                                              } else {
+                                                ScaffoldMessenger.of(context).showSnackBar(
+                                                  const SnackBar(
+                                                    content: Text('비밀번호가 일치하지 않습니다.'),
+                                                    backgroundColor: Colors.redAccent,
+                                                  ),
+                                                );
+                                              }
+                                            },
+                                            child: const Text('확인'),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                    
+                                    controller.dispose();
+                                    
+                                    if (shouldProceed != true) {
+                                      return; // 취소하거나 비밀번호가 틀린 경우
+                                    }
+                                  }
+                                  
+                                  // 선수 추가
+                                  if (mounted) {
+                                    setState(() {
+                                      g.players.add(p);
+                                      _waitingPlayers.remove(p);
+                                      TournamentLogic.syncGroupMatches(g, idx + 1);
+                                      _refreshRankings();
+                                    });
+                                    widget.onDataChanged();
+                                    Navigator.pop(ctx);
+                                  }
+                                },
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      const Divider(),
+                      const SizedBox(height: 16),
+                    ],
+                    // 새로운 조 생성 옵션
+                    Card(
+                      elevation: 2,
+                      color: canAddGroup ? Colors.blue.shade50 : Colors.grey.shade100,
+                      child: ListTile(
+                        leading: Icon(
+                          Icons.add_box_outlined,
+                          color: canAddGroup ? Colors.blue : Colors.grey,
+                          size: 28,
+                        ),
+                        title: Text(
+                          '새로운 조 생성 및 배정',
+                          style: TextStyle(
+                            color: canAddGroup ? Colors.blue : Colors.grey,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                        enabled: canAddGroup,
+                        onTap: canAddGroup
+                            ? () {
+                                Navigator.pop(ctx);
+                                _addNewGroup();
+                                final lastIdx = _currentEvent.groups!.length - 1;
+                                final newGroup = _currentEvent.groups![lastIdx];
+                                setState(() {
+                                  newGroup.players.add(p);
+                                  _waitingPlayers.remove(p);
+                                  TournamentLogic.syncGroupMatches(newGroup, lastIdx + 1);
+                                  _refreshRankings();
+                                });
+                                widget.onDataChanged();
+                              }
+                            : null,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            // 하단바 - #1a535c 색상
+            Container(
+              decoration: const BoxDecoration(
+                color: Color(0xFF1a535c),
+                borderRadius: BorderRadius.only(
+                  bottomLeft: Radius.circular(12),
+                  bottomRight: Radius.circular(12),
+                ),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    ),
+                    child: const Text('취소', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     ));
   }
 
@@ -336,7 +580,115 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
         const Padding(padding: EdgeInsets.symmetric(vertical: 8.0), child: Text('대기 선수와 교체하기', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue))),
         ..._waitingPlayers.map((waitingP) => ListTile(dense: true, visualDensity: VisualDensity.compact, leading: Icon(Icons.swap_horiz, color: hasRecord ? Colors.grey : Colors.blue), title: Text(_isTeamMatch ? waitingP.affiliation : waitingP.name, style: TextStyle(color: hasRecord ? Colors.grey : Colors.black)), onTap: hasRecord ? null : () { setState(() { int idx = group.players.indexOf(player); if (idx != -1) { group.players[idx] = waitingP; _waitingPlayers.remove(waitingP); _waitingPlayers.insert(0, player); TournamentLogic.syncGroupMatches(group, currentGroupIdx + 1); _refreshRankings(); } }); widget.onDataChanged(); Navigator.pop(ctx); })),
         const Divider(),
-        if (canAdd) ...[ const Padding(padding: EdgeInsets.symmetric(vertical: 8.0), child: Text('대기 선수 충원하기', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green))), ..._waitingPlayers.map((waitingP) => ListTile(dense: true, visualDensity: VisualDensity.compact, leading: const Icon(Icons.person_add, color: Colors.green), title: Text(_isTeamMatch ? waitingP.affiliation : waitingP.name), onTap: () { setState(() { group.players.add(waitingP); _waitingPlayers.remove(waitingP); TournamentLogic.syncGroupMatches(group, currentGroupIdx + 1); _refreshRankings(); }); widget.onDataChanged(); Navigator.pop(ctx); })), ],
+        ...[
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8.0),
+            child: Text(
+              canAdd ? '대기 선수 충원하기' : '대기 선수 충원하기 (관리자 권한 필요)',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: canAdd ? Colors.green : Colors.orange,
+              ),
+            ),
+          ),
+          ..._waitingPlayers.map((waitingP) => ListTile(
+            dense: true,
+            visualDensity: VisualDensity.compact,
+            leading: Icon(
+              canAdd ? Icons.person_add : Icons.lock_outline,
+              color: canAdd ? Colors.green : Colors.orange,
+            ),
+            title: Text(_isTeamMatch ? waitingP.affiliation : waitingP.name),
+            onTap: () async {
+              // 조별 인원 초과 체크
+              if (!canAdd) {
+                // 조별 인원 초과 시 관리자 비밀번호 확인
+                final savedPassword = await FileUtils.getAdminPassword();
+                final controller = TextEditingController();
+                
+                final shouldProceed = await showDialog<bool>(
+                  context: ctx,
+                  barrierDismissible: false,
+                  builder: (dialogCtx) => AlertDialog(
+                    title: const Text('조별 인원 초과'),
+                    content: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          '조별인원을 초과 하였습니다. 관리자권한으로 추가합니까?',
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                        ),
+                        const SizedBox(height: 16),
+                        TextField(
+                          controller: controller,
+                          obscureText: true,
+                          autofocus: true,
+                          decoration: const InputDecoration(
+                            labelText: '관리자 비밀번호',
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          ),
+                          onSubmitted: (_) {
+                            if (controller.text == savedPassword || savedPassword.isEmpty || savedPassword == '1234') {
+                              Navigator.pop(dialogCtx, true);
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('비밀번호가 일치하지 않습니다.'),
+                                  backgroundColor: Colors.redAccent,
+                                ),
+                              );
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(dialogCtx, false),
+                        child: const Text('취소'),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          if (controller.text == savedPassword || savedPassword.isEmpty || savedPassword == '1234') {
+                            Navigator.pop(dialogCtx, true);
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('비밀번호가 일치하지 않습니다.'),
+                                backgroundColor: Colors.redAccent,
+                              ),
+                            );
+                          }
+                        },
+                        child: const Text('확인'),
+                      ),
+                    ],
+                  ),
+                );
+                
+                controller.dispose();
+                
+                if (shouldProceed != true) {
+                  return; // 취소하거나 비밀번호가 틀린 경우
+                }
+              }
+              
+              // 선수 추가
+              if (mounted) {
+                setState(() {
+                  group.players.add(waitingP);
+                  _waitingPlayers.remove(waitingP);
+                  TournamentLogic.syncGroupMatches(group, currentGroupIdx + 1);
+                  _refreshRankings();
+                });
+                widget.onDataChanged();
+                Navigator.pop(ctx);
+              }
+            },
+          )),
+        ],
       ]
     ])), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('닫기'))]));
   }

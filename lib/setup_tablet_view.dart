@@ -253,7 +253,7 @@ class _SetupTabletViewState extends State<SetupTabletView> with SetupLogicMixin<
         elevation: 0,
         backgroundColor: const Color(0xFF1A535C),
         foregroundColor: Colors.white,
-        title: Text(titleController.text.isEmpty ? '대회 설정' : titleController.text, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        title: Text(titleController.text.isEmpty ? '대회 설정' : titleController.text, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
         actions: [
           TextButton(onPressed: _goToGroupStage, child: const Text('예선전', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600))),
           const SizedBox(width: 8),
@@ -409,7 +409,7 @@ class _SetupTabletViewState extends State<SetupTabletView> with SetupLogicMixin<
     return SingleChildScrollView(
       padding: const EdgeInsets.all(40),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [Expanded(child: TextField(controller: titleController, onEditingComplete: () { saveData(); }, style: Theme.of(context).textTheme.displayLarge?.copyWith(fontWeight: FontWeight.bold, color: const Color(0xFF1A535C)), decoration: const InputDecoration(border: InputBorder.none, hintText: '대회 명칭을 입력하세요'))), if (currentFileName == null) ElevatedButton.icon(onPressed: _handleInitialSave, icon: const Icon(Icons.save_alt), label: const Text('대회 파일 생성/고정'), style: ElevatedButton.styleFrom(backgroundColor: Colors.amber, foregroundColor: Colors.black87))]),
+        Row(children: [Expanded(child: TextField(controller: titleController, onEditingComplete: () { saveData(); }, style: Theme.of(context).textTheme.displayLarge?.copyWith(fontSize: 40, fontWeight: FontWeight.bold, color: const Color(0xFF1A535C)), decoration: const InputDecoration(border: InputBorder.none, hintText: '대회 명칭을 입력하세요'))), if (currentFileName == null) ElevatedButton.icon(onPressed: _handleInitialSave, icon: const Icon(Icons.save_alt), label: const Text('대회 파일 생성/고정'), style: ElevatedButton.styleFrom(backgroundColor: Colors.amber, foregroundColor: Colors.black87))]),
         const SizedBox(height: 32),
         Text('진행 종목', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, color: Colors.grey)),
         const SizedBox(height: 12),
@@ -532,23 +532,37 @@ class _SetupTabletViewState extends State<SetupTabletView> with SetupLogicMixin<
 
   Widget _buildPlayerInputCard() {
     bool isTeam = currentEvent!.teamSize > 1;
+    // 본선이 시작되었는지 확인
     bool isKnockoutStarted = currentEvent!.knockoutRounds != null && currentEvent!.knockoutRounds!.isNotEmpty;
+    // 예선전 게임이 모두 종료되었는지 확인
+    final groups = currentEvent!.groups ?? [];
+    final bool isSkipMode = currentEvent!.settings.skipGroupStage;
+    bool canProceed = false;
+    if (isSkipMode) { canProceed = true; }
+    else {
+      canProceed = groups.isNotEmpty &&
+                   groups.every((g) => g.matches.isNotEmpty &&
+                   g.matches.every((m) => m.status == MatchStatus.completed || m.status == MatchStatus.withdrawal));
+    }
+    // 선수 추가 가능 여부: 본선이 시작되지 않았고, 예선전 게임이 모두 종료되지 않은 상태
+    final bool canAddPlayer = !isKnockoutStarted && (isSkipMode || !canProceed || groups.isEmpty);
+    
     if (isTeam) _updateTeamMemberControllers(currentEvent!.teamSize);
     return Stack(clipBehavior: Clip.none, children: [
       Card(
-        elevation: 4, shadowColor: Colors.black12, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), color: isKnockoutStarted ? Colors.grey.shade50 : Colors.white,
+        elevation: 4, shadowColor: Colors.black12, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), color: canAddPlayer ? Colors.white : Colors.grey.shade50,
         child: Padding(padding: const EdgeInsets.all(32), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [Text(isTeam ? '${currentEvent!.teamSize}인 단체전 선수 등록' : '개인전 선수 등록', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, color: isKnockoutStarted ? Colors.grey : const Color(0xFF1A535C))), if (isKnockoutStarted) const Padding(padding: EdgeInsets.only(left: 12), child: Text('(본선 시작으로 추가 불가)', style: TextStyle(color: Colors.red, fontSize: 13, fontWeight: FontWeight.bold)))]),
+          Row(children: [Text(isTeam ? '${currentEvent!.teamSize}인 단체전 선수 등록' : '개인전 선수 등록', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, color: canAddPlayer ? const Color(0xFF1A535C) : Colors.grey)), if (!canAddPlayer) const Padding(padding: EdgeInsets.only(left: 12), child: Text('(본선 시작으로 추가 불가)', style: TextStyle(color: Colors.red, fontSize: 13, fontWeight: FontWeight.bold)))]),
           const SizedBox(height: 24),
           if (isTeam) ...[
-            TextField(controller: _teamNameController, enabled: !isKnockoutStarted, decoration: const InputDecoration(labelText: '팀명 (클럽명)', border: OutlineInputBorder())),
+            TextField(controller: _teamNameController, enabled: canAddPlayer, decoration: const InputDecoration(labelText: '팀명 (클럽명)', border: OutlineInputBorder())),
             const SizedBox(height: 20),
-            Wrap(spacing: 16, runSpacing: 16, children: List.generate(currentEvent!.teamSize + 1, (i) => SizedBox(width: 250, child: Row(children: [Expanded(child: TextField(controller: i < _teamMemberControllers.length ? _teamMemberControllers[i] : null, enabled: !isKnockoutStarted && i < _teamMemberControllers.length, decoration: InputDecoration(labelText: i < currentEvent!.teamSize ? '${i + 1}번 선수 이름(부수)' : '예비 선수 이름(부수)', border: const OutlineInputBorder()), onChanged: (value) { if (value.trim().isEmpty) setState(() {}); })), if (i < _teamMemberControllers.length && _teamMemberControllers[i].text.trim().isNotEmpty && !isKnockoutStarted) IconButton(icon: const Icon(Icons.clear, size: 20, color: Colors.red), onPressed: () => setState(() => _teamMemberControllers[i].clear()), tooltip: '삭제')]))))
+            Wrap(spacing: 16, runSpacing: 16, children: List.generate(currentEvent!.teamSize + 1, (i) => SizedBox(width: 250, child: Row(children: [Expanded(child: TextField(controller: i < _teamMemberControllers.length ? _teamMemberControllers[i] : null, enabled: canAddPlayer && i < _teamMemberControllers.length, decoration: InputDecoration(labelText: i < currentEvent!.teamSize ? '${i + 1}번 선수 이름(부수)' : '예비 선수 이름(부수)', border: const OutlineInputBorder()), onChanged: (value) { if (value.trim().isEmpty) setState(() {}); })), if (i < _teamMemberControllers.length && _teamMemberControllers[i].text.trim().isNotEmpty && canAddPlayer) IconButton(icon: const Icon(Icons.clear, size: 20, color: Colors.red), onPressed: () => setState(() => _teamMemberControllers[i].clear()), tooltip: '삭제')]))))
           ] else ...[
-            Row(children: [Expanded(child: TextField(controller: _nameController, enabled: !isKnockoutStarted, decoration: const InputDecoration(labelText: '이름(부수)', border: OutlineInputBorder(), hintText: '이름 입력 (DB에서 검색됨)'))), const SizedBox(width: 20), Expanded(child: TextField(controller: _affController, enabled: !isKnockoutStarted, decoration: const InputDecoration(labelText: '소속 클럽명', border: OutlineInputBorder())))])
+            Row(children: [Expanded(child: TextField(controller: _nameController, enabled: canAddPlayer, decoration: const InputDecoration(labelText: '이름(부수)', border: OutlineInputBorder(), hintText: '이름 입력 (DB에서 검색됨)'))), const SizedBox(width: 20), Expanded(child: TextField(controller: _affController, enabled: canAddPlayer, decoration: const InputDecoration(labelText: '소속 클럽명', border: OutlineInputBorder())))])
           ],
           const SizedBox(height: 32),
-          ElevatedButton.icon(onPressed: isKnockoutStarted ? null : _addPlayer, icon: const Icon(Icons.person_add_alt_1), label: const Text('참가 명단에 추가하기', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)), style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6B6B), foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 60), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))))
+          ElevatedButton.icon(onPressed: canAddPlayer ? _addPlayer : null, icon: const Icon(Icons.person_add_alt_1), label: const Text('참가 명단에 추가하기', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)), style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6B6B), foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 60), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))))
         ]))
       ),
       if (_showAutoComplete && !isTeam) Positioned(top: 145, left: 32, right: 32, child: Material(elevation: 8, borderRadius: BorderRadius.circular(8), child: Container(constraints: const BoxConstraints(maxHeight: 250), decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8), color: Colors.white), child: ListView.separated(shrinkWrap: true, padding: EdgeInsets.zero, itemCount: _searchedMasterPlayers.length, separatorBuilder: (ctx, i) => const Divider(height: 1), itemBuilder: (ctx, idx) { final p = _searchedMasterPlayers[idx]; return ListTile(leading: const Icon(Icons.person_search, color: Color(0xFF1A535C)), title: Text("${p.name} (${p.tier})", style: const TextStyle(fontWeight: FontWeight.bold)), subtitle: Text("${p.city} - ${p.affiliation}"), trailing: const Text('선택하기', style: TextStyle(color: Colors.blue, fontSize: 12)), onTap: () => _selectMasterPlayer(p)); }))))
@@ -589,13 +603,29 @@ class _SetupTabletViewState extends State<SetupTabletView> with SetupLogicMixin<
   Widget _buildPlayerSelectTab({required bool isPanelExpanded}) {
     final q = _playerSelectQuery.toLowerCase(); final allowedTiers = currentEvent!.settings.allowedTiers;
     List<MasterPlayer> candidates = _allMasterPlayers.where((p) { if (q.isNotEmpty && !p.city.toLowerCase().contains(q) && !p.affiliation.toLowerCase().contains(q) && !p.name.toLowerCase().contains(q)) return false; if (allowedTiers.isNotEmpty && !allowedTiers.contains(p.tier)) return false; return true; }).toList();
-    final bool isTeam = currentEvent!.teamSize > 1; final bool isKnockoutStarted = currentEvent!.knockoutRounds != null && currentEvent!.knockoutRounds!.isNotEmpty; final int columnCount = isPanelExpanded ? 4 : 3;
+    final bool isTeam = currentEvent!.teamSize > 1;
+    // 본선이 시작되었는지 확인
+    final bool isKnockoutStarted = currentEvent!.knockoutRounds != null && currentEvent!.knockoutRounds!.isNotEmpty;
+    // 예선전 게임이 모두 종료되었는지 확인
+    final groups = currentEvent!.groups ?? [];
+    final bool isSkipMode = currentEvent!.settings.skipGroupStage;
+    bool canProceed = false;
+    if (isSkipMode) { canProceed = true; }
+    else {
+      canProceed = groups.isNotEmpty &&
+                   groups.every((g) => g.matches.isNotEmpty &&
+                   g.matches.every((m) => m.status == MatchStatus.completed || m.status == MatchStatus.withdrawal));
+    }
+    // 선수 추가 가능 여부: 본선이 시작되지 않았고, 예선전 게임이 모두 종료되지 않은 상태
+    final bool canAddPlayer = !isKnockoutStarted && (isSkipMode || !canProceed || groups.isEmpty);
+    
+    final int columnCount = isPanelExpanded ? 4 : 3;
     return Column(children: [
       Padding(padding: const EdgeInsets.fromLTRB(24, 16, 24, 8), child: TextField(decoration: const InputDecoration(labelText: '지역 / 동호회 / 이름 검색', prefixIcon: Icon(Icons.search), border: OutlineInputBorder(), isDense: true), onChanged: (v) => setState(() => _playerSelectQuery = v))),
       if (isTeam) const Padding(padding: EdgeInsets.symmetric(horizontal: 24, vertical: 4), child: Text('※ 단체전: 선수를 선택하면 입력칸에 자동으로 등록됩니다.', style: TextStyle(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.bold))),
-      if (isKnockoutStarted) const Padding(padding: EdgeInsets.symmetric(horizontal: 24, vertical: 4), child: Text('※ 본선이 시작되어 선수를 추가할 수 없습니다.', style: TextStyle(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.bold))),
+      if (!canAddPlayer) const Padding(padding: EdgeInsets.symmetric(horizontal: 24, vertical: 4), child: Text('※ 본선이 시작되어 선수를 추가할 수 없습니다.', style: TextStyle(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.bold))),
       const Divider(height: 1),
-      Expanded(child: candidates.isEmpty ? const Center(child: Text('검색 결과가 없습니다.', style: TextStyle(color: Colors.grey))) : GridView.builder(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2), gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: columnCount, childAspectRatio: 3.4, crossAxisSpacing: 8, mainAxisSpacing: 4), itemCount: candidates.length, itemBuilder: (ctx, idx) { final p = candidates[idx]; final bool isKnockoutStarted = currentEvent!.knockoutRounds != null && currentEvent!.knockoutRounds!.isNotEmpty; final String displayName = '${p.name} (${p.tier})'; final bool isAlreadyRegistered = isTeam ? _isPlayerAlreadyRegistered(displayName) : currentEvent!.players.any((e) => e.name == displayName); final circleColor = isAlreadyRegistered ? Colors.blue : const Color(0xFF1A535C); final bool canAdd = !isKnockoutStarted && !isAlreadyRegistered; return Card(elevation: 1, margin: EdgeInsets.zero, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2), child: Row(children: [GestureDetector(onTap: canAdd ? () { if (isTeam) { _addPlayerToTeamInput(p); } else { _secureSettingUpdate(() { currentEvent!.players.insert(0, Player(id: p.id != null ? p.id!.toString() : uuid.v4(), name: displayName, affiliation: p.affiliation.isNotEmpty ? p.affiliation : (p.city.isNotEmpty ? p.city : '개인'))); saveData(); }, isPlayerAction: true); } } : null, child: CircleAvatar(backgroundColor: circleColor, radius: 16, child: Text(p.playerNumber.isNotEmpty ? p.playerNumber : '${idx + 1}', style: const TextStyle(color: Colors.white, fontSize: 10)))), const SizedBox(width: 10), Expanded(child: FittedBox(alignment: Alignment.centerLeft, fit: BoxFit.scaleDown, child: Column(mainAxisAlignment: MainAxisAlignment.center, mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [Text(displayName, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis), Text('${p.city} · ${p.affiliation}', style: const TextStyle(fontSize: 12, color: Colors.black87), maxLines: 1, overflow: TextOverflow.ellipsis)])))]))); }))
+      Expanded(child: candidates.isEmpty ? const Center(child: Text('검색 결과가 없습니다.', style: TextStyle(color: Colors.grey))) : GridView.builder(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2), gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: columnCount, childAspectRatio: 3.4, crossAxisSpacing: 8, mainAxisSpacing: 4), itemCount: candidates.length, itemBuilder: (ctx, idx) { final p = candidates[idx]; final String displayName = '${p.name} (${p.tier})'; final bool isAlreadyRegistered = isTeam ? _isPlayerAlreadyRegistered(displayName) : currentEvent!.players.any((e) => e.name == displayName); final circleColor = isAlreadyRegistered ? Colors.blue : const Color(0xFF1A535C); final bool canAdd = canAddPlayer && !isAlreadyRegistered; return Card(elevation: 1, margin: EdgeInsets.zero, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2), child: Row(children: [GestureDetector(onTap: canAdd ? () { if (isTeam) { _addPlayerToTeamInput(p); } else { _secureSettingUpdate(() { currentEvent!.players.insert(0, Player(id: p.id != null ? p.id!.toString() : uuid.v4(), name: displayName, affiliation: p.affiliation.isNotEmpty ? p.affiliation : (p.city.isNotEmpty ? p.city : '개인'))); saveData(); }, isPlayerAction: true); } } : null, child: CircleAvatar(backgroundColor: circleColor, radius: 16, child: Text(p.playerNumber.isNotEmpty ? p.playerNumber : '${idx + 1}', style: const TextStyle(color: Colors.white, fontSize: 10)))), const SizedBox(width: 10), Expanded(child: FittedBox(alignment: Alignment.centerLeft, fit: BoxFit.scaleDown, child: Column(mainAxisAlignment: MainAxisAlignment.center, mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [Text(displayName, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis), Text('${p.city} · ${p.affiliation}', style: const TextStyle(fontSize: 12, color: Colors.black87), maxLines: 1, overflow: TextOverflow.ellipsis)])))]))); }))
     ]);
   }
 
@@ -607,7 +637,25 @@ class _SetupTabletViewState extends State<SetupTabletView> with SetupLogicMixin<
   }
 
   void _addPlayer() {
-    if (currentEvent!.knockoutRounds != null && currentEvent!.knockoutRounds!.isNotEmpty) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('본선 토너먼트가 시작되어 선수를 추가할 수 없습니다.'), backgroundColor: Colors.redAccent)); return; }
+    // 본선이 시작되었는지 확인
+    final bool isKnockoutStarted = currentEvent!.knockoutRounds != null && currentEvent!.knockoutRounds!.isNotEmpty;
+    // 예선전 게임이 모두 종료되었는지 확인
+    final groups = currentEvent!.groups ?? [];
+    final bool isSkipMode = currentEvent!.settings.skipGroupStage;
+    bool canProceed = false;
+    if (isSkipMode) { canProceed = true; }
+    else {
+      canProceed = groups.isNotEmpty &&
+                   groups.every((g) => g.matches.isNotEmpty &&
+                   g.matches.every((m) => m.status == MatchStatus.completed || m.status == MatchStatus.withdrawal));
+    }
+    // 선수 추가 가능 여부: 본선이 시작되지 않았고, 예선전 게임이 모두 종료되지 않은 상태
+    final bool canAddPlayer = !isKnockoutStarted && (isSkipMode || !canProceed || groups.isEmpty);
+    
+    if (!canAddPlayer) { 
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('본선 토너먼트가 시작되어 선수를 추가할 수 없습니다.'), backgroundColor: Colors.redAccent)); 
+      return; 
+    }
     _secureSettingUpdate(() {
       bool isTeam = currentEvent!.teamSize > 1;
       if (isTeam) {
