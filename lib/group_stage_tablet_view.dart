@@ -39,6 +39,18 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
   TournamentEvent get _currentEvent => widget.allEvents[_currentEventIdx];
   bool get _isTeamMatch => _currentEvent.teamSize > 1;
 
+  // [추가] 단식 선수명 포맷팅 함수 (10자 제한 및 줄바꿈)
+  String _formatSinglesPlayerName(String name, String affiliation) {
+    String n = name;
+    String a = affiliation.isNotEmpty ? "($affiliation)" : "";
+    
+    // 10자 이상이면 생략 처리
+    if (n.length > 10) n = "${n.substring(0, 10)}...";
+    if (a.length > 10) a = "${a.substring(0, 10)}...";
+    
+    return a.isEmpty ? n : "$n\n$a";
+  }
+
   @override
   void initState() {
     super.initState();
@@ -202,7 +214,7 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
 
   Widget _buildRightStickyProgressPanel(List<Group> groups) {
     return Opacity(
-      opacity: _stickyPanelOpacity.clamp(0.0, 1.0),
+      opacity: _stickyPanelOpacity.clamp(0.1, 1.0),
       child: Material(
         elevation: 4, color: Colors.white,
         child: Column(
@@ -214,7 +226,7 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   TabBar(controller: _rightTabController, tabs: const [Tab(text: '참가 현황'), Tab(text: '선수 선택')], labelColor: Colors.white, unselectedLabelColor: Colors.white70, indicatorColor: Colors.cyanAccent, indicatorWeight: 3, labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), child: Row(children: [const Text('투명도', style: TextStyle(color: Colors.white70, fontSize: 11)), Expanded(child: Slider(value: _stickyPanelOpacity, onChanged: (v) => setState(() => _stickyPanelOpacity = v), activeColor: Colors.white, inactiveColor: Colors.white24))])),
+                  Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), child: Row(children: [const Text('투명도', style: TextStyle(color: Colors.white70, fontSize: 11)), Expanded(child: Slider(value: _stickyPanelOpacity, min: 0.1, max: 1.0, onChanged: (v) => setState(() => _stickyPanelOpacity = v), activeColor: Colors.white, inactiveColor: Colors.white24))])),
                 ],
               ),
             ),
@@ -530,7 +542,7 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
         final index = e.key; final p = e.value; final s = stats[p]!; final isAdv = index < _currentEvent.settings.advancingCount;
         return TableRow(children: [
           _tableCell('${index + 1}', color: isAdv ? Colors.blue : Colors.black, isBold: isAdv),
-          TableCell(child: InkWell(onTap: () => _showPlayerActionDialog(p, groupIdx), child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10), child: Text(_isTeamMatch ? p.affiliation : "${p.name}(${p.affiliation})", style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, decoration: TextDecoration.underline, decorationStyle: TextDecorationStyle.dotted))))),
+          TableCell(child: InkWell(onTap: () => _showPlayerActionDialog(p, groupIdx), child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10), child: Text(_isTeamMatch ? p.affiliation : _formatSinglesPlayerName(p.name, p.affiliation), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold))))),
           _tableCell('${s['wins']}'), _tableCell('${s['won']}'), _tableCell('${s['lost']}'), _tableCell('${s['diff']}'),
           TableCell(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 2), child: Row(mainAxisAlignment: MainAxisAlignment.center, mainAxisSize: MainAxisSize.min, children: [GestureDetector(onTap: index == 0 ? null : () => _moveRank(groupIdx, index, -1), child: Icon(Icons.arrow_upward, size: 18, color: index == 0 ? Colors.grey.shade200 : Colors.blue)), const SizedBox(width: 1), GestureDetector(onTap: index == rankings.length - 1 ? null : () => _moveRank(groupIdx, index, 1), child: Icon(Icons.arrow_downward, size: 18, color: index == rankings.length - 1 ? Colors.grey.shade200 : Colors.red))])))
         ]);
@@ -542,7 +554,7 @@ class _GroupStageTabletViewState extends State<GroupStageTabletView> with Ticker
 
   Widget _buildMatchTile(Match m, Group group) {
     if (!_isTeamMatch) {
-      return Container(margin: const EdgeInsets.only(bottom: 4), decoration: BoxDecoration(color: const Color(0xFFF8F9FA), borderRadius: BorderRadius.circular(8)), child: ListTile(dense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 12), visualDensity: VisualDensity.compact, title: Row(children: [Expanded(child: Text("${m.player1?.name ?? 'BYE'} (${m.player1?.affiliation ?? ''})", textAlign: TextAlign.right, style: const TextStyle(fontSize: 13))), Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2), margin: const EdgeInsets.symmetric(horizontal: 10), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.grey.shade300)), child: Text('${m.score1} : ${m.score2}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.redAccent))), Expanded(child: Text("${m.player2?.name ?? 'BYE'} (${m.player2?.affiliation ?? ''})", textAlign: TextAlign.left, style: const TextStyle(fontSize: 13)))]), onTap: () => _maybeShowScoreDialog(m, group)));
+      return Container(margin: const EdgeInsets.only(bottom: 4), decoration: BoxDecoration(color: const Color(0xFFF8F9FA), borderRadius: BorderRadius.circular(8)), child: ListTile(dense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 12), visualDensity: VisualDensity.compact, title: Row(children: [Expanded(child: Text(_formatSinglesPlayerName(m.player1?.name ?? 'BYE', m.player1?.affiliation ?? ''), textAlign: TextAlign.right, style: const TextStyle(fontSize: 13))), Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2), margin: const EdgeInsets.symmetric(horizontal: 10), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.grey.shade300)), child: Text('${m.score1} : ${m.score2}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.redAccent))), Expanded(child: Text(_formatSinglesPlayerName(m.player2?.name ?? 'BYE', m.player2?.affiliation ?? ''), textAlign: TextAlign.left, style: const TextStyle(fontSize: 13)))]), onTap: () => _maybeShowScoreDialog(m, group)));
     }
     return InkWell(
       onTap: () => _maybeShowScoreDialog(m, group),

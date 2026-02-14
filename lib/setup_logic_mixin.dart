@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
@@ -432,11 +433,29 @@ mixin SetupLogicMixin<T extends StatefulWidget> on State<T> {
   Future<void> pickExcelFile() async {
     if (currentEvent == null) return;
     try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['xlsx', 'xls'], withData: true);
+      // [수정] 윈도우에서 안정적으로 동작하도록 withData: false로 설정하고 file.path 사용
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom, 
+        allowedExtensions: ['xlsx', 'xls'],
+        withData: false, // 윈도우에서는 false가 더 안정적
+      );
       if (result == null || result.files.isEmpty) return;
       final file = result.files.first;
-      Uint8List? bytes = file.bytes ?? (file.path != null ? await File(file.path!).readAsBytes() : null);
-      if (bytes == null) return;
+      // [수정] 윈도우에서는 file.path를 우선 사용
+      Uint8List? bytes;
+      if (file.path != null) {
+        bytes = await File(file.path!).readAsBytes();
+      } else if (file.bytes != null) {
+        bytes = file.bytes;
+      }
+      if (bytes == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('파일을 읽을 수 없습니다.'))
+          );
+        }
+        return;
+      }
       var excel = excel_lib.Excel.decodeBytes(bytes);
       List<String> sheetNames = excel.tables.keys.toList();
       if (!mounted) return;
@@ -450,13 +469,28 @@ mixin SetupLogicMixin<T extends StatefulWidget> on State<T> {
             if (row.isEmpty) continue;
             String name = ""; String affiliation = "";
             if (teamSize > 1) {
+              // [단체전] A컬럼: 팀명/소속, B컬럼~: 선수 이름(부수)
               affiliation = row[0]?.value?.toString().trim() ?? '개인';
               List<String> memberNames = [];
-              for (int i = 1; i <= teamSize; i++) { if (row.length > i && row[i] != null) { String mName = row[i]!.value.toString().trim(); if (mName.isNotEmpty) memberNames.add(mName); } }
+              for (int i = 1; i <= teamSize; i++) {
+                if (row.length > i && row[i] != null) {
+                  String mName = row[i]!.value.toString().trim();
+                  if (mName.isNotEmpty) memberNames.add(mName);
+                }
+              }
               name = memberNames.join(', ');
             } else {
-              name = row[0]?.value?.toString().trim() ?? "";
+              // [개인전] A컬럼: 이름, B컬럼: 소속, C컬럼: 부수 (선택사항)
+              String nameOnly = row[0]?.value?.toString().trim() ?? "";
               affiliation = (row.length >= 2 && row[1] != null) ? row[1]!.value.toString().trim() : '개인';
+              String tier = (row.length >= 3 && row[2] != null) ? row[2]!.value.toString().trim() : "";
+              
+              // 부수가 있으면 "이름 (부수)" 형식으로, 없으면 이름만
+              if (tier.isNotEmpty) {
+                name = "$nameOnly ($tier)";
+              } else {
+                name = nameOnly;
+              }
             }
             if (name.isEmpty) continue;
             if (affiliation.isEmpty) affiliation = '개인';

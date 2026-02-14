@@ -10,6 +10,7 @@ import 'knockout_page.dart';
 import 'program_settings_page.dart';
 import 'setup_logic_mixin.dart';
 import 'file_utils.dart'; // [추가]
+import 'package:path/path.dart' as p; // [추가] 경로 처리를 위해
 
 /// 경기설정 부수설정에서 선택 가능한 17가지 부수 명칭
 const List<String> _tierOptions = [
@@ -228,7 +229,8 @@ class _SetupTabletViewState extends State<SetupTabletView> with SetupLogicMixin<
     final eventsToShow = visibleEvents.isEmpty ? List<TournamentEvent>.from(events) : visibleEvents;
     int initialIdx = 0;
     if (selectedEventIdx < events.length) {
-      final idx = eventsToShow.indexWhere((e) => e.id == events[selectedEventIdx].id);
+      final currentId = events[selectedEventIdx].id;
+      final idx = eventsToShow.indexWhere((e) => e.id == currentId);
       if (idx >= 0) initialIdx = idx;
     }
     Navigator.push(context, MaterialPageRoute(builder: (context) => GroupStagePage(tournamentBaseTitle: titleController.text, allEvents: eventsToShow, initialEventIdx: initialIdx, onDataChanged: saveData)));
@@ -280,11 +282,27 @@ class _SetupTabletViewState extends State<SetupTabletView> with SetupLogicMixin<
   }
 
   Widget _buildSidebar() {
+    // [추가] 외부 이미지 로드 경로 생성 (현재 베이스 디렉토리/img/logo.png)
+    final logoPath = p.join(FileUtils.currentBaseDir, 'img', 'logo.png');
+    final logoFile = File(logoPath);
+    // [추가] 상단 마크 이미지 경로 생성 (현재 베이스 디렉토리/img/mark.png)
+    final markPath = p.join(FileUtils.currentBaseDir, 'img', 'mark.png');
+    final markFile = File(markPath);
+
     return Container(
       width: 280, color: const Color(0xFF1A535C),
       child: Column(children: [
         const SizedBox(height: 50),
-        const Icon(Icons.emoji_events_outlined, color: Colors.white, size: 40),
+        // [수정] mark.png 파일이 있으면 이미지로 표시, 없으면 기본 아이콘 표시
+        markFile.existsSync()
+            ? Image.file(
+                markFile,
+                width: 40,
+                height: 40,
+                fit: BoxFit.contain,
+                errorBuilder: (ctx, err, st) => const Icon(Icons.emoji_events_outlined, color: Colors.white, size: 40),
+              )
+            : const Icon(Icons.emoji_events_outlined, color: Colors.white, size: 40),
         const SizedBox(height: 12),
         const Text('탁구 대회 매니저', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
         const Text('PC/Tablet Edition', style: TextStyle(color: Colors.white54, fontSize: 11)),
@@ -311,6 +329,24 @@ class _SetupTabletViewState extends State<SetupTabletView> with SetupLogicMixin<
           _sidebarItem(Icons.refresh_rounded, '새 대회 시작', false, _handleReset),
           const Divider(color: Colors.white24, height: 30),
         ] else const Expanded(child: SizedBox()),
+        
+        // [수정] 하단 이미지 삽입 구간 (가로 2 : 세로 3 비율, 양쪽 여백 제거 및 너비 꽉 채우기)
+        if (logoFile.existsSync()) 
+          Flexible(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 10), // 좌우 패딩을 0으로 설정
+              child: AspectRatio(
+                aspectRatio: 2 / 3,
+                child: Image.file(
+                  logoFile,
+                  fit: BoxFit.fitWidth, // 가로를 꽉 채우도록 설정
+                  alignment: Alignment.center,
+                  errorBuilder: (ctx, err, st) => const SizedBox.shrink(),
+                ),
+              ),
+            ),
+          ),
+
         const Divider(color: Colors.white24, height: 1),
         const Spacer(),
         const SizedBox(height: 10),
@@ -424,16 +460,18 @@ class _SetupTabletViewState extends State<SetupTabletView> with SetupLogicMixin<
     return ValueListenableBuilder<Set<String>>(
       valueListenable: eventUncheckedIdsNotifier,
       builder: (context, uncheckedIds, _) {
+        // [수정] 체크 해제되지 않은 종목만 필터링
+        final visibleEventEntries = events.asMap().entries.where((e) => !uncheckedIds.contains(e.value.id)).toList();
+
         return Wrap(spacing: 12, runSpacing: 12, children: [
-          ...events.asMap().entries.map((e) {
+          ...visibleEventEntries.map((e) {
             final isSelected = selectedEventIdx == e.key;
-            final isExcluded = uncheckedIds.contains(e.value.id);
             return Padding(
               padding: const EdgeInsets.only(right: 4),
               child: GestureDetector(
                 onLongPress: () => _deleteEventDialog(e.key),
                 child: ChoiceChip(
-                  label: Padding(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2), child: Text(e.value.name, style: TextStyle(fontWeight: FontWeight.bold, color: isExcluded ? Colors.red : (isSelected ? Colors.white : Colors.black)))),
+                  label: Padding(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2), child: Text(e.value.name, style: TextStyle(fontWeight: FontWeight.bold, color: isSelected ? Colors.white : Colors.black))),
                   selected: isSelected,
                   selectedColor: const Color(0xFF1A535C),
                   onSelected: (v) { if (v) { setState(() { selectedEventIdx = e.key; if (currentEvent != null && currentEvent!.teamSize > 1) { _updateTeamMemberControllers(currentEvent!.teamSize); } }); } },
